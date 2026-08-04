@@ -1,8 +1,13 @@
-"""Datos semilla: los tres columnistas iniciales y las preferencias.
+"""Datos semilla: los columnistas iniciales y las preferencias.
 
-Es idempotente: se puede ejecutar cuantas veces se quiera, no duplica nada.
-La lista vive aquí solo para arrancar el proyecto en limpio; a partir de ese
-momento se administra desde la pantalla de Configuración de la app.
+Es idempotente: se ejecuta en cada arranque y solo añade lo que falte, sin
+duplicar ni pisar lo que hayas cambiado desde la app. Si borras un columnista
+de esta lista desde la interfaz, **volverá a aparecer** en el siguiente
+arranque; para quitarlo del todo, bórralo también de aquí, o simplemente
+desactívalo (la casilla «activa») y dejará de recolectarse.
+
+A partir del primer arranque todo se administra desde
+Ajustes › Columnistas, sin tocar este archivo.
 """
 
 from __future__ import annotations
@@ -17,38 +22,149 @@ from app.models import Columnist, SourceType, UserPreference
 
 log = logging.getLogger(__name__)
 
+
+def _c(
+    name: str,
+    outlet: str,
+    source_url: str,
+    frequency: str,
+    *,
+    extractor: str | None = None,
+    source_type: SourceType = SourceType.auto,
+    browser_identity: bool = False,
+    active: bool = True,
+    notes: str | None = None,
+) -> dict:
+    return {
+        "name": name,
+        "outlet": outlet,
+        "source_url": source_url,
+        "expected_frequency": frequency,
+        "extractor_key": extractor,
+        "source_type": source_type,
+        "browser_identity": browser_identity,
+        "active": active,
+        "notes": notes,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Notas sobre las banderas de esta lista
+#
+#   extractor="elfinanciero" / "eluniversal" / "reforma"
+#       Medios con extractor propio, más preciso que el genérico.
+#
+#   browser_identity=True
+#       Milenio devuelve 403 a cualquier cliente que no sea un navegador,
+#       comprobado en la práctica. Los demás medios se dejan con la
+#       identificación propia de la aplicación.
+#
+#   Sin extractor indicado -> se usa el genérico, que funciona razonablemente
+#   bien en casi cualquier periódico. Si en alguno el resultado no convence,
+#   escribir un módulo propio son ~30 líneas (ver docs/anadir-columnista.md).
+# ---------------------------------------------------------------------------
 SEED_COLUMNISTS: list[dict] = [
-    {
-        "name": "Raymundo Riva Palacio",
-        "outlet": "El Financiero",
-        "source_url": "https://www.elfinanciero.com.mx/opinion/raymundo-riva-palacio/",
-        "source_type": SourceType.auto,
-        "expected_frequency": "lunes a viernes",
-        "extractor_key": "elfinanciero",
-        "browser_identity": False,
-        "notes": "Estrictamente Personal. Contenido mixto: algunas columnas requieren suscripción.",
-    },
-    {
-        "name": "Héctor de Mauleón",
-        "outlet": "El Universal",
-        "source_url": "https://www.eluniversal.com.mx/autores/hector-de-mauleon/",
-        "source_type": SourceType.auto,
-        "expected_frequency": "lunes a viernes",
-        "extractor_key": "eluniversal",
-        "notes": "En Tercera Persona. Normalmente de acceso abierto.",
-    },
-    {
-        "name": "Jesús Silva-Herzog Márquez",
-        "outlet": "Reforma",
-        "source_url": "https://www.reforma.com/jesus-silva-herzog-marquez/",
-        "source_type": SourceType.html,
-        "expected_frequency": "lunes",
-        "extractor_key": "reforma",
-        "notes": (
-            "Requiere suscripción. Guarda las cookies de tu sesión de Reforma "
-            "en Configuración › Credenciales para obtener la columna completa."
-        ),
-    },
+    # --- El Financiero -----------------------------------------------------
+    _c("Raymundo Riva Palacio", "El Financiero",
+       "https://www.elfinanciero.com.mx/opinion/raymundo-riva-palacio/",
+       "lunes a viernes", extractor="elfinanciero",
+       notes="Estrictamente Personal. Contenido mixto: algunas columnas requieren suscripción."),
+    _c("Enrique Krauze", "El Financiero",
+       "https://www.elfinanciero.com.mx/opinion/enrique-krauze1/",
+       "irregular, mensual", extractor="elfinanciero",
+       notes="Antes en Reforma y El País."),
+    _c("Jorge G. Castañeda", "El Financiero",
+       "https://www.elfinanciero.com.mx/opinion/jorge-castaneda/",
+       "semanal", extractor="elfinanciero",
+       notes="Día de publicación sin verificar."),
+    _c("Macario Schettino", "El Financiero",
+       "https://www.elfinanciero.com.mx/opinion/macario-schettino/",
+       "lunes a viernes", extractor="elfinanciero",
+       notes="Fuera de la Caja."),
+    _c("Antonio Navalón", "El Financiero",
+       "https://www.elfinanciero.com.mx/opinion/antonio-navalon/",
+       "semanal", extractor="elfinanciero",
+       notes="Año Cero. También participa en Código Magenta (#AlPunto)."),
+
+    # --- El Universal ------------------------------------------------------
+    _c("Héctor de Mauleón", "El Universal",
+       "https://www.eluniversal.com.mx/autores/hector-de-mauleon/",
+       "lunes a viernes", extractor="eluniversal",
+       notes="En Tercera Persona. Normalmente de acceso abierto."),
+    _c("Carlos Loret de Mola", "El Universal",
+       "https://www.eluniversal.com.mx/autores/carlos-loret-de-mola/",
+       "lunes a viernes", extractor="eluniversal",
+       notes="Historias de Reportero."),
+
+    # --- Reforma (requiere suscripción) ------------------------------------
+    _c("Jesús Silva-Herzog Márquez", "Reforma",
+       "https://www.reforma.com/jesus-silva-herzog-marquez/",
+       "lunes", extractor="reforma", source_type=SourceType.html,
+       notes="Requiere suscripción: guarda las cookies en Ajustes › Credenciales."),
+    _c("Denise Dresser", "Reforma",
+       "https://www.reforma.com/denise-dresser/",
+       "lunes", extractor="reforma", source_type=SourceType.html,
+       notes="Columna política semanal. Requiere suscripción."),
+    _c("Carlos Elizondo Mayer-Serra", "Reforma",
+       "https://www.reforma.com/carlos-elizondo-mayer-serra/",
+       "domingos", extractor="reforma", source_type=SourceType.html,
+       notes="Página editorial. Requiere suscripción."),
+    _c("Sergio Sarmiento", "Reforma",
+       "https://www.reforma.com/sergio-sarmiento/",
+       "lunes a viernes", extractor="reforma", source_type=SourceType.html,
+       notes="Jaque Mate. Sindicada en más de 20 diarios. Requiere suscripción."),
+
+    # --- Milenio (rechaza al robot: necesita identidad de navegador) -------
+    _c("Héctor Aguilar Camín", "Milenio",
+       "https://www.milenio.com/opinion/hector-aguilar-camin",
+       "semanal", browser_identity=True,
+       notes="Milenio devuelve 403 al robot; puede requerir también el navegador headless."),
+    _c("Joaquín López-Dóriga", "Milenio",
+       "https://www.milenio.com/opinion/joaquin-lopezdoriga",
+       "martes a viernes", browser_identity=True,
+       notes="En privado."),
+    _c("Francisco Abundis", "Milenio",
+       "https://www.milenio.com/opinion/francisco-abundis",
+       "semanal", browser_identity=True,
+       notes="Columna de Parametría (encuestas). Día sin verificar."),
+
+    # --- Excélsior ---------------------------------------------------------
+    _c("Jorge Fernández Menéndez", "Excélsior",
+       "https://www.excelsior.com.mx/opinion/jorge-fernandez-menendez",
+       "lunes a viernes", notes="Razones."),
+    _c("Leo Zuckermann", "Excélsior",
+       "https://www.excelsior.com.mx/opinion/leo-zuckermann",
+       "lunes a viernes", notes="Juegos de poder."),
+
+    # --- Otros medios ------------------------------------------------------
+    _c("Javier Solórzano", "La Razón",
+       "https://www.razon.com.mx/autor/javier-solorzano-zinser/",
+       "lunes a viernes", notes="De memoria."),
+    _c("María Amparo Casar", "UnoTV",
+       "https://www.unotv.com/opinion/maria-amparo-casar/",
+       "sin verificar",
+       notes="Dejó Excélsior tras 11 años. Colabora en UnoTV y medios de radio."),
+    _c("Ramón Alberto Garza", "Código Magenta",
+       "https://www.codigomagenta.com.mx/seccion/que-alguien-me-explique/",
+       "varias veces por semana", notes="¡Que alguien me explique!"),
+
+    # --- Pendientes de completar (llegan desactivados) ----------------------
+    _c("Denise Dresser", "Proceso",
+       "https://www.proceso.com.mx/",
+       "semanal", active=False,
+       notes=(
+           "DESACTIVADO: falta la URL de su página de autor en Proceso. "
+           "Búscala en el sitio, pégala en «URL de su página de autor» y "
+           "activa la casilla «activa»."
+       )),
+    _c("Eduardo Guerrero Gutiérrez", "Nexos",
+       "https://www.nexos.com.mx/",
+       "sin verificar", active=False,
+       notes=(
+           "DESACTIVADO: analista de seguridad, publica en Nexos y en "
+           "colaboraciones sueltas, sin página de autor confirmada. Busca su "
+           "página en nexos.com.mx, pega la URL y activa la casilla «activa»."
+       )),
 ]
 
 

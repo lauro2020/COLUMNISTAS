@@ -26,6 +26,10 @@ Es lo normal. El extractor genérico funciona en casi cualquier periódico.
 4. Si el resultado es bueno, ya está: entrará en la recolección de mañana. Para
    probarlo ahora, ve a **Fuentes** y pulsa **Recolectar solo esta**.
 
+> Con muchos columnistas, en vez de ir uno por uno:
+> `docker compose exec api python -m app.cli check-sources` los prueba todos y
+> resume el resultado en una tabla.
+
 ### Si la prueba sale mal
 
 | Lo que ves | Qué significa | Qué hacer |
@@ -151,4 +155,5 @@ seleccionará solo para ese medio.
 | `eluniversal.py` | Caso típico: selectores CSS sobre un Drupal |
 | `elfinanciero.py` | El artículo viene en un JSON incrustado (Arc Publishing). Más estable que cualquier selector |
 | `reforma.py` | Muro de pago + contenido pintado con JavaScript (`needs_browser = True`) |
+| `milenio.py` | Sitio que rechaza al robot: identidad de navegador + `needs_browser` |
 | `generic.py` | El respaldo: detección del bloque principal por densidad de texto |

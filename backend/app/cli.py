@@ -9,6 +9,7 @@ Cada componente se puede ejecutar y probar por separado:
     python -m app.cli audio --article 12      # genera el audio de un artículo
     python -m app.cli audio --missing         # genera todos los que falten
     python -m app.cli status                  # resumen del sistema
+    python -m app.cli check-sources           # prueba TODAS las fuentes
     python -m app.cli test-source 3           # prueba una fuente sin guardar
     python -m app.cli download-piper-voice es_MX-ald-medium
 """
@@ -160,7 +161,11 @@ def cmd_test_source(args: argparse.Namespace) -> int:
         extractor = get_extractor(columnist.source_url, columnist.extractor_key)
         print(f"Fuente: {columnist.name} ({columnist.outlet})")
         print(f"Extractor: {extractor.key}")
-        with Fetcher(cookies=cookies) as fetcher:
+        if columnist.browser_identity:
+            print("Identificación: navegador")
+        with Fetcher(
+            cookies=cookies, browser_identity=columnist.browser_identity
+        ) as fetcher:
             refs = extractor.discover(columnist.source_url, fetcher)
             print(f"Artículos detectados: {len(refs)}")
             for ref in refs[:5]:
@@ -247,6 +252,77 @@ def cmd_doctor(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_check_sources(args: argparse.Namespace) -> int:
+    """Prueba TODAS las fuentes de una vez, sin guardar nada.
+
+    Con veinte columnistas, ir de uno en uno pulsando «Probar fuente» no es
+    práctico. Esto recorre la lista y resume en una tabla qué funciona, qué
+    encuentra cada una y por qué fallan las que fallan.
+    """
+    from app.collector.extractors.registry import get_extractor
+    from app.collector.http_client import Fetcher
+    from app.collector.runner import cookies_for_outlet
+    from app.models import Columnist
+
+    query = select(Columnist).order_by(Columnist.outlet, Columnist.name)
+    if not args.all:
+        query = query.where(Columnist.active.is_(True))
+
+    with session_scope() as db:
+        fuentes = [
+            (c.id, c.name, c.outlet, c.source_url, c.feed_url,
+             c.extractor_key, c.browser_identity,
+             cookies_for_outlet(db, c.outlet))
+            for c in db.scalars(query).all()
+        ]
+
+    print(f"\nProbando {len(fuentes)} fuentes. "
+          f"Hay una espera de cortesía entre peticiones, así que tarda.\n")
+    print(f"{'':>4} {'COLUMNISTA':<30} {'MEDIO':<16} {'RESULTADO'}")
+    print("-" * 100)
+
+    ok = degradadas = fallidas = 0
+    detalles: list[tuple[str, str]] = []
+
+    for cid, name, outlet, source_url, feed_url, extractor_key, browser, cookies in fuentes:
+        extractor = get_extractor(source_url, extractor_key)
+        try:
+            with Fetcher(cookies=cookies, browser_identity=browser) as fetcher:
+                if feed_url:
+                    from app.collector import rss
+
+                    refs = rss.parse_feed(feed_url, fetcher)
+                    origen = "RSS"
+                else:
+                    refs = extractor.discover(source_url, fetcher)
+                    origen = extractor.key
+            if refs:
+                ok += 1
+                estado = f"✓  {len(refs):>2} artículos vía {origen}"
+            else:
+                degradadas += 1
+                estado = f"~  0 artículos vía {origen} (¿no publicó, o extractor?)"
+        except Exception as exc:  # noqa: BLE001 - una fuente rota no detiene el repaso
+            fallidas += 1
+            estado = "✗  falló"
+            detalles.append((f"{name} ({outlet})", str(exc)))
+
+        marca = "🌐" if browser else "  "
+        print(f"{cid:>4} {name[:29]:<30} {outlet[:15]:<16} {marca} {estado}")
+
+    print("-" * 100)
+    print(f"  {ok} bien · {degradadas} sin artículos · {fallidas} con error")
+    print("  🌐 = se identifica como navegador\n")
+
+    if detalles:
+        print("Errores:\n")
+        for quien, error in detalles:
+            print(f"  · {quien}")
+            print(f"    {error[:300]}\n")
+
+    return 0
+
+
 def cmd_download_piper(args: argparse.Namespace) -> int:
     voice = args.voice
     if voice not in PIPER_PATHS:
@@ -289,6 +365,12 @@ def main() -> int:
     p_audio.add_argument("--provider")
     p_audio.add_argument("--limit", type=int, default=50)
     p_audio.set_defaults(func=cmd_audio)
+
+    p_check = sub.add_parser(
+        "check-sources", help="prueba TODAS las fuentes de una vez")
+    p_check.add_argument("--all", action="store_true",
+                         help="incluir también las fuentes desactivadas")
+    p_check.set_defaults(func=cmd_check_sources)
 
     p_test = sub.add_parser("test-source", help="prueba una fuente sin guardar nada")
     p_test.add_argument("columnist_id", type=int)

@@ -184,11 +184,32 @@ docker compose down -v            # apagar Y BORRAR todos los datos
 
 ## Primer uso
 
-Al arrancar, la app ya trae cargados los tres columnistas de la lista inicial.
-No esperes a mañana: en la pantalla **Hoy** pulsa **↻ Buscar ahora**. La
-recolección tarda uno o dos minutos, y los audios otro poco más.
+Al arrancar, la app ya trae cargados **21 columnistas** de nueve medios
+(El Financiero, El Universal, Reforma, Milenio, Excélsior, La Razón, UnoTV,
+Código Magenta y Proceso). Dos llegan **desactivados** porque les falta la URL
+de su página de autor; se ven en Ajustes con una nota explicando qué completar.
 
-Después ve a la pestaña **Fuentes** para ver si alguna dio problemas.
+No esperes a mañana: en la pantalla **Hoy** pulsa **↻ Buscar ahora**. Con
+tantas fuentes la primera recolección tarda unos **10 minutos** (hay una espera
+de cortesía entre peticiones al mismo medio) y los audios otro tanto.
+
+Para ver de un vistazo cuáles funcionan, sin esperar a la recolección:
+
+```bash
+docker compose exec api python -m app.cli check-sources
+```
+
+Te imprime una tabla con las 21 fuentes, cuántos artículos encuentra cada una
+y el error exacto de las que fallan. Después, la pestaña **Fuentes** de la app
+muestra lo mismo con el histórico de los últimos días.
+
+### Cuánto cuesta el audio con esta lista
+
+Con unas 15 columnas nuevas al día y la voz de OpenAI, ronda los **0.20 USD
+diarios**, unos 6 o 7 dólares al mes. Si prefieres que no cueste nada, cambia a
+Piper en Ajustes, o desactiva **«Generar el audio automáticamente al
+recolectar»** y genera solo el de las columnas que te interesen, desde el botón
+«↻ Audio» de cada artículo.
 
 ---
 
@@ -439,7 +460,10 @@ docker compose exec api python -m app.cli collect
 # Recolectar solo una fuente (el id sale de `status`)
 docker compose exec api python -m app.cli collect --columnist 2
 
-# Probar una fuente SIN guardar nada: ¿responde? ¿qué extrae?
+# Probar TODAS las fuentes de una vez y ver cuáles fallan
+docker compose exec api python -m app.cli check-sources
+
+# Probar una sola fuente SIN guardar nada: ¿responde? ¿qué extrae?
 docker compose exec api python -m app.cli test-source 3
 
 # Generar el audio de un artículo concreto
@@ -555,11 +579,13 @@ texto, así que lo importante es la base de datos.
 
 ## Cuando algo falla
 
-**Empieza siempre por aquí.** Este comando distingue en 30 segundos entre un
-problema de red, un bloqueo del medio y un fallo del extractor:
+**Empieza siempre por aquí.** Dos comandos: el primero distingue entre un
+problema de red y un bloqueo del medio; el segundo prueba la extracción de
+todas las fuentes a la vez.
 
 ```bash
 docker compose exec api python -m app.cli doctor
+docker compose exec api python -m app.cli check-sources
 ```
 
 | Síntoma | Qué mirar |

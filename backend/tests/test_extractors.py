@@ -173,3 +173,49 @@ def test_una_pagina_normal_no_se_confunde_con_la_de_acceso():
     assert is_login_gate(
         "https://www.reforma.com/la-ley-y-la-trampa/ar2987654", fixtures.REFORMA_FULL
     ) is False
+
+
+# ---------------------------------------------------------------------------
+# Semilla
+# ---------------------------------------------------------------------------
+from app.seed import SEED_COLUMNISTS  # noqa: E402
+
+
+def test_la_semilla_no_tiene_columnistas_repetidos():
+    claves = [(c["name"], c["outlet"]) for c in SEED_COLUMNISTS]
+    assert len(claves) == len(set(claves)), "la clave única es (nombre, medio)"
+
+
+def test_todas_las_urls_de_la_semilla_son_absolutas():
+    for entrada in SEED_COLUMNISTS:
+        assert entrada["source_url"].startswith("https://"), entrada["name"]
+
+
+def test_los_extractores_indicados_en_la_semilla_existen():
+    disponibles = set(extractor_keys())
+    for entrada in SEED_COLUMNISTS:
+        clave = entrada["extractor_key"]
+        if clave:
+            assert clave in disponibles, f"{entrada['name']} pide «{clave}»"
+
+
+def test_el_extractor_indicado_coincide_con_el_dominio():
+    for entrada in SEED_COLUMNISTS:
+        clave = entrada["extractor_key"]
+        if clave:
+            elegido = get_extractor(entrada["source_url"]).key
+            assert elegido == clave, f"{entrada['name']}: {elegido} != {clave}"
+
+
+def test_milenio_llega_con_identidad_de_navegador():
+    """Milenio devuelve 403 al robot; se comprobó en la práctica."""
+    milenio = [c for c in SEED_COLUMNISTS if c["outlet"] == "Milenio"]
+    assert milenio, "debe haber columnistas de Milenio"
+    assert all(c["browser_identity"] for c in milenio)
+
+
+def test_las_fuentes_sin_url_de_autor_llegan_desactivadas():
+    """Sin página de autor no se puede recolectar: mejor inactiva y avisando."""
+    for entrada in SEED_COLUMNISTS:
+        if not entrada["active"]:
+            assert "DESACTIVADO" in (entrada["notes"] or ""), entrada["name"]
