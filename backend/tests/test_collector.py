@@ -213,3 +213,57 @@ def test_un_fallo_de_dns_no_gasta_los_reintentos():
         fetcher.get("https://www.medio.test/autor/")
 
     assert ruta.call_count == 1, "una sola petición al dominio original"
+
+
+# ---------------------------------------------------------------------------
+# Identificación ante los medios
+# ---------------------------------------------------------------------------
+@respx.mock
+def test_por_defecto_se_identifica_como_columnistas():
+    ruta = respx.get("https://medio.test/a").mock(return_value=httpx.Response(200))
+    with Fetcher() as fetcher:
+        fetcher.get("https://medio.test/a")
+
+    agente = ruta.calls[0].request.headers["user-agent"]
+    assert "ColumnistasBot" in agente
+
+
+@respx.mock
+def test_con_identidad_de_navegador_se_manda_la_cabecera_de_un_navegador():
+    ruta = respx.get("https://medio.test/a").mock(return_value=httpx.Response(200))
+    with Fetcher(browser_identity=True) as fetcher:
+        fetcher.get("https://medio.test/a")
+
+    cabeceras = ruta.calls[0].request.headers
+    assert "Mozilla/5.0" in cabeceras["user-agent"]
+    assert "ColumnistasBot" not in cabeceras["user-agent"]
+    assert cabeceras["sec-fetch-mode"] == "navigate"
+
+
+@respx.mock
+def test_un_403_explica_que_hacer():
+    respx.get("https://medio.test/a").mock(return_value=httpx.Response(403))
+    with Fetcher() as fetcher:
+        resultado = fetcher.get("https://medio.test/a")
+
+    assert resultado.ok is False
+    assert "403" in resultado.error
+    assert "navegador" in resultado.error.lower(), "debe sugerir la solución"
+
+
+@respx.mock
+def test_un_403_con_identidad_de_navegador_sugiere_el_paso_siguiente():
+    respx.get("https://medio.test/a").mock(return_value=httpx.Response(403))
+    with Fetcher(browser_identity=True) as fetcher:
+        resultado = fetcher.get("https://medio.test/a")
+
+    assert "headless" in resultado.error.lower()
+
+
+@respx.mock
+def test_un_401_apunta_a_las_credenciales():
+    respx.get("https://medio.test/a").mock(return_value=httpx.Response(401))
+    with Fetcher() as fetcher:
+        resultado = fetcher.get("https://medio.test/a")
+
+    assert "credenciales" in resultado.error.lower()

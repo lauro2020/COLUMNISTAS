@@ -37,6 +37,7 @@ class ColumnistBase(BaseModel):
     expected_frequency: str = "diaria"
     extractor_key: str | None = None
     active: bool = True
+    browser_identity: bool = False
     notes: str | None = None
 
 
@@ -53,6 +54,7 @@ class ColumnistUpdate(BaseModel):
     expected_frequency: str | None = None
     extractor_key: str | None = None
     active: bool | None = None
+    browser_identity: bool | None = None
     notes: str | None = None
 
 

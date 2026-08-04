@@ -85,6 +85,12 @@ class Columnist(Base):
     # Fuerza un extractor concreto; si va vacío se elige por dominio.
     extractor_key: Mapped[str | None] = mapped_column(String(80))
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Algunos medios devuelven 403 a cualquier cliente que no sea un navegador.
+    # Con esto activado, las peticiones a ESTA fuente se identifican como lo
+    # haría tu navegador, para poder leer lo que ya puedes leer en él.
+    browser_identity: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false"
+    )
     notes: Mapped[str | None] = mapped_column(Text)
 
     # Salud de la fuente

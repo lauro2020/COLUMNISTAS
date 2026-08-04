@@ -127,15 +127,50 @@ def _respect_rate_limit(host: str) -> None:
         _last_request[host] = time.monotonic()
 
 
+#: Identificación propia: es la que se usa por defecto y la que permite al
+#: medio saber quién le está pidiendo las páginas.
+OWN_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "es-MX,es;q=0.9,en;q=0.6",
+}
+
+#: Identificación de navegador. Solo se usa en las fuentes donde tú lo actives,
+#: porque algunos medios devuelven 403 a cualquier cliente que no sea un
+#: navegador, incluso para leer su robots.txt. Es la misma petición que haría
+#: tu Mac al abrir esa página, y sirve para leer lo que ya puedes leer.
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,*/*;q=0.8"
+    ),
+    "Accept-Language": "es-MX,es;q=0.9,en;q=0.8",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+
 class Fetcher:
     """Se crea uno por ejecución de recolección; reutiliza la conexión."""
 
-    def __init__(self, cookies: dict[str, str] | None = None, headers: dict[str, str] | None = None):
-        base_headers = {
-            "User-Agent": settings.user_agent,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "es-MX,es;q=0.9,en;q=0.6",
-        }
+    def __init__(
+        self,
+        cookies: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+        *,
+        browser_identity: bool = False,
+    ):
+        self.browser_identity = browser_identity
+        if browser_identity:
+            base_headers = dict(BROWSER_HEADERS)
+        else:
+            base_headers = {"User-Agent": settings.user_agent, **OWN_HEADERS}
         if headers:
             base_headers.update(headers)
         self._client = httpx.Client(
@@ -191,7 +226,7 @@ class Fetcher:
                     text=resp.text,
                     ok=resp.status_code < 400,
                     elapsed_ms=elapsed,
-                    error=None if resp.status_code < 400 else f"HTTP {resp.status_code}",
+                    error=None if resp.status_code < 400 else self._describe_status(resp.status_code),
                 )
             except httpx.HTTPError as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
@@ -227,6 +262,36 @@ class Fetcher:
             url=url, status_code=0, text="", ok=False,
             elapsed_ms=elapsed, error=last_error or "fallo desconocido",
         )
+
+    def _describe_status(self, status_code: int) -> str:
+        """Traduce el código HTTP a algo accionable."""
+        if status_code == 403:
+            if self.browser_identity:
+                return (
+                    "HTTP 403 — el medio sigue rechazando la petición aun "
+                    "identificándonos como navegador. Este sitio filtra por algo "
+                    "más que el User-Agent; hace falta el navegador headless "
+                    "(construye con INSTALL_PLAYWRIGHT=true y pon "
+                    "ENABLE_HEADLESS_BROWSER=true en el .env)."
+                )
+            return (
+                "HTTP 403 — el medio rechaza a nuestro robot. Activa "
+                "«Identificarse como navegador» en la ficha de este columnista "
+                "(Ajustes › Columnistas › Editar) y vuelve a probar."
+            )
+        if status_code in (401, 402):
+            return (
+                f"HTTP {status_code} — el medio pide una sesión de suscriptor. "
+                "Guarda las cookies de tu suscripción en Ajustes › Credenciales."
+            )
+        if status_code == 404:
+            return "HTTP 404 — esa dirección ya no existe. Revisa la URL del columnista."
+        if status_code == 429:
+            return (
+                "HTTP 429 — demasiadas peticiones seguidas. Sube "
+                "REQUEST_DELAY_SECONDS en el .env."
+            )
+        return f"HTTP {status_code}"
 
     @staticmethod
     def _backoff(attempt: int) -> None:

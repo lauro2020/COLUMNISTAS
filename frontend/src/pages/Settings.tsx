@@ -11,7 +11,7 @@ import { useApp } from '../state/AppContext'
 const EMPTY_COLUMNIST = {
   name: '', outlet: '', source_url: '', feed_url: '',
   source_type: 'auto' as const, expected_frequency: 'diaria',
-  extractor_key: '', active: true, notes: '',
+  extractor_key: '', active: true, browser_identity: false, notes: '',
 }
 
 export function Settings() {
@@ -260,6 +260,11 @@ export function Settings() {
           <div className="faint" style={{ wordBreak: 'break-all', marginTop: '.4rem' }}>
             {columnist.source_url}
           </div>
+          {columnist.browser_identity && (
+            <span className="pill" style={{ marginTop: '.3rem' }}>
+              se identifica como navegador
+            </span>
+          )}
           {columnist.feed_url && (
             <div className="faint" style={{ wordBreak: 'break-all' }}>RSS: {columnist.feed_url}</div>
           )}
@@ -278,6 +283,7 @@ export function Settings() {
                   expected_frequency: columnist.expected_frequency,
                   extractor_key: columnist.extractor_key ?? '',
                   active: columnist.active,
+                  browser_identity: columnist.browser_identity,
                   notes: columnist.notes ?? '',
                 })
               }}
@@ -359,6 +365,23 @@ export function Settings() {
               placeholder="diaria, lunes a viernes, semanal…"
               onChange={(e) => setDraft({ ...draft, expected_frequency: e.target.value })}
             />
+          </div>
+
+          <div className="field">
+            <label className="row" style={{ cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={draft.browser_identity}
+                onChange={(e) => setDraft({ ...draft, browser_identity: e.target.checked })}
+              />
+              <span>Identificarse como navegador</span>
+            </label>
+            <span className="hint">
+              Actívalo solo si este medio responde «403». Algunos sitios rechazan
+              cualquier petición que no venga de un navegador, incluso para servir
+              su robots.txt. Con esto, las peticiones a esta fuente se hacen igual
+              que las de tu navegador, para leer lo que ya puedes leer en él.
+            </span>
           </div>
 
           <div className="row">

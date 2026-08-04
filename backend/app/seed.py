@@ -25,6 +25,7 @@ SEED_COLUMNISTS: list[dict] = [
         "source_type": SourceType.auto,
         "expected_frequency": "lunes a viernes",
         "extractor_key": "elfinanciero",
+        "browser_identity": False,
         "notes": "Estrictamente Personal. Contenido mixto: algunas columnas requieren suscripción.",
     },
     {

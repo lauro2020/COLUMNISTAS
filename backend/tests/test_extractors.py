@@ -151,3 +151,25 @@ def test_html_corrupto_no_revienta():
     roto = "<html><body><div><p>uno<p>dos</div"
     resultado = GenericExtractor().extract_from_html(roto, "https://x.test/a")
     assert resultado is None or resultado.blocks is not None
+
+
+# ---------------------------------------------------------------------------
+# Reforma: pantalla de acceso
+# ---------------------------------------------------------------------------
+from app.collector.extractors.reforma import is_login_gate  # noqa: E402
+
+
+def test_se_detecta_la_pantalla_de_acceso_de_reforma():
+    # Lo que devolvió de verdad: 302 a /libre/acceso/accesofb.htm
+    assert is_login_gate(
+        "https://www.reforma.com/libre/acceso/accesofb.htm?urlredirect=/autor/", ""
+    ) is True
+    assert is_login_gate(
+        "https://www.reforma.com/autor/", "<html>Inicia sesión para continuar</html>"
+    ) is True
+
+
+def test_una_pagina_normal_no_se_confunde_con_la_de_acceso():
+    assert is_login_gate(
+        "https://www.reforma.com/la-ley-y-la-trampa/ar2987654", fixtures.REFORMA_FULL
+    ) is False

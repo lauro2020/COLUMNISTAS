@@ -27,6 +27,29 @@ from app.collector.extractors.generic import GenericExtractor
 # Reforma usa URLs tipo /titulo-de-la-columna/ar1234567
 ARTICLE_RE = re.compile(r"/ar\d{5,}", re.IGNORECASE)
 
+# Cuando no reconoce una sesión de suscriptor, Reforma redirige a su pantalla
+# de acceso. Detectarlo permite decir qué pasa en vez de "no encontré nada".
+LOGIN_PATH_RE = re.compile(r"/libre/acceso/|/acceso/|accesofb", re.IGNORECASE)
+
+LOGIN_MESSAGE = (
+    "Reforma redirigió a su pantalla de acceso: no reconoció una sesión de "
+    "suscriptor. Guarda las cookies de tu suscripción en "
+    "Ajustes › Credenciales, con el medio escrito exactamente «Reforma». "
+    "Si ya las guardaste, seguramente caducaron: vuelve a copiarlas."
+)
+
+
+def is_login_gate(final_url: str, html: str) -> bool:
+    """¿Nos mandaron a la pantalla de acceso en vez de al contenido?"""
+    if LOGIN_PATH_RE.search(final_url or ""):
+        return True
+    # Página de acceso servida sin redirección: es corta y pide iniciar sesión
+    if len(html or "") < 20000 and re.search(
+        r"(inicia sesi[óo]n|iniciar sesi[óo]n|accesofb)", html or "", re.IGNORECASE
+    ):
+        return True
+    return False
+
 
 class ReformaExtractor(GenericExtractor):
     key = "reforma"
@@ -42,6 +65,22 @@ class ReformaExtractor(GenericExtractor):
         "article .text-container",
         "div.text-container",
     ]
+
+    def discover(self, source_url: str, fetcher) -> list[ArticleRef]:
+        result = fetcher.get(source_url, use_browser=self.needs_browser)
+        if not result.ok:
+            raise RuntimeError(result.error or "no se pudo abrir la página del autor")
+        if is_login_gate(result.url, result.text):
+            raise RuntimeError(LOGIN_MESSAGE)
+        return self.discover_from_html(result.text, result.url)
+
+    def extract(self, url: str, fetcher):
+        result = fetcher.get(url, use_browser=self.needs_browser)
+        if not result.ok:
+            raise RuntimeError(result.error or "no se pudo abrir el artículo")
+        if is_login_gate(result.url, result.text):
+            raise RuntimeError(LOGIN_MESSAGE)
+        return self.extract_from_html(result.text, result.url)
 
     def discover_from_html(self, html: str, base_url: str) -> list[ArticleRef]:
         soup = BeautifulSoup(html, "lxml")

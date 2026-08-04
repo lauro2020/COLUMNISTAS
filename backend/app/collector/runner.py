@@ -139,7 +139,9 @@ def collect_one(db: Session, columnist: Columnist) -> tuple[list[int], int]:
     cookies = cookies_for_outlet(db, columnist.outlet)
     extractor = get_extractor(columnist.source_url, columnist.extractor_key)
 
-    with Fetcher(cookies=cookies) as fetcher:
+    with Fetcher(
+        cookies=cookies, browser_identity=columnist.browser_identity
+    ) as fetcher:
         try:
             refs = _discover(columnist, extractor, fetcher, db)
             refs = _filter_candidates(db, columnist, refs)

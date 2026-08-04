@@ -324,12 +324,30 @@ Mira `eluniversal.py` (selectores CSS), `elfinanciero.py` (JSON incrustado de
 Arc) y `reforma.py` (muro de pago + navegador headless) como ejemplos reales de
 las tres situaciones típicas.
 
+### Cuando un medio responde 403
+
+Algunos periódicos rechazan cualquier petición que no venga de un navegador
+—incluso la de su propio `robots.txt`—. Para esos casos, cada columnista tiene
+la casilla **«Identificarse como navegador»** en su ficha:
+
+- Está **desactivada por defecto**: la app se presenta con su propio
+  User-Agent, que es lo correcto y lo que permite al medio saber quién le pide
+  las páginas.
+- Al activarla, las peticiones **a esa fuente** se hacen igual que las de tu
+  navegador. Es la misma petición que haría tu Mac al abrir esa página: sirve
+  para leer con comodidad lo que ya puedes leer, y sigue siendo para tu
+  consumo personal.
+- Si aun con la casilla activada el medio devuelve 403, es que filtra por algo
+  más que el User-Agent y hace falta el navegador headless
+  (`INSTALL_PLAYWRIGHT=true` al construir y `ENABLE_HEADLESS_BROWSER=true`).
+
 ### Reglas que aplica el sistema por ti
 
 No tienes que preocuparte de esto al escribir un extractor, ya está resuelto:
 
 - Se respeta `robots.txt` (desactivable con `RESPECT_ROBOTS=false`).
-- Se envía un User-Agent propio e identificable.
+- Se envía un User-Agent propio e identificable (salvo en las fuentes donde
+  actives «Identificarse como navegador»).
 - Hay un mínimo de segundos entre peticiones al mismo dominio.
 - Los fallos temporales se reintentan con espera exponencial (2 s, 4 s, 8 s…).
 - El navegador headless solo se usa si el contenido lo requiere.
@@ -520,6 +538,8 @@ docker compose exec api python -m app.cli doctor
 
 | Síntoma | Qué mirar |
 |---|---|
+| `HTTP 403 — el medio rechaza a nuestro robot` | Ese sitio (Milenio, entre otros) responde 403 a cualquier cliente que no sea un navegador, incluso para servir su `robots.txt`. En **Ajustes › Columnistas › Editar**, activa **«Identificarse como navegador»** para esa fuente. Si aun así sigue en 403, filtra por algo más que el User-Agent y hace falta el navegador headless. |
+| Reforma dice `redirigió a su pantalla de acceso` | No reconoció tu sesión. Guarda las cookies en **Ajustes › Credenciales** con el medio escrito exactamente `Reforma`. Si ya estaban, caducaron: vuelve a copiarlas. |
 | `No address associated with hostname` | Es DNS, no scraping: el contenedor no logra traducir el dominio a una dirección. Corre `doctor`. La configuración ya fuerza DNS de Cloudflare y Google, porque el resolutor interno de Docker Desktop falla con algunos periódicos. Si sigue, prueba `docker compose restart` y reinicia Docker Desktop. |
 | No aparece ninguna columna | Pestaña **Fuentes**: ahí se ve el error exacto de cada medio. |
 | Una fuente en rojo | El medio cambió su web. Prueba `test-source <id>`; si el genérico tampoco saca nada, hará falta ajustar el extractor. |

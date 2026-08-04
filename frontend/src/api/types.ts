@@ -11,6 +11,7 @@ export interface Columnist {
   expected_frequency: string
   extractor_key: string | null
   active: boolean
+  browser_identity: boolean
   notes: string | null
   consecutive_failures: number
   last_success_at: string | null

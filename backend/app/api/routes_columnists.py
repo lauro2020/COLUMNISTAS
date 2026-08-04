@@ -130,7 +130,9 @@ def test_columnist(
     cookies = cookies_for_outlet(db, columnist.outlet)
     extractor = get_extractor(columnist.source_url, columnist.extractor_key)
 
-    with Fetcher(cookies=cookies) as fetcher:
+    with Fetcher(
+        cookies=cookies, browser_identity=columnist.browser_identity
+    ) as fetcher:
         try:
             if columnist.feed_url:
                 refs = rss.parse_feed(columnist.feed_url, fetcher)

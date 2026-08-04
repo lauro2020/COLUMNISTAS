@@ -34,6 +34,8 @@ Es lo normal. El extractor genérico funciona en casi cualquier periódico.
 | `encontrados: 0` | La página del autor existe pero no se reconocen los enlaces a sus columnas | Prueba con la URL de la sección de opinión, o escribe un extractor (parte B) |
 | Muestra con 1-2 párrafos y `muro de pago` | El medio corta el texto para no suscriptores | Guarda tus cookies en **Ajustes → Credenciales** |
 | Muestra con texto de menús o anuncios | El extractor genérico eligió mal el bloque | Escribe un extractor (parte B) |
+| `HTTP 403 — el medio rechaza a nuestro robot` | El sitio bloquea todo lo que no sea un navegador | Edita el columnista y activa **«Identificarse como navegador»** |
+| `redirigió a su pantalla de acceso` | El medio no reconoció tu sesión de suscriptor | Guarda las cookies en **Ajustes → Credenciales** |
 
 ---
 
