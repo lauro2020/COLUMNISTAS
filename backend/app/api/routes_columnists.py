@@ -139,6 +139,13 @@ def test_columnist(
                 origen = f"RSS ({columnist.feed_url})"
             else:
                 page = fetcher.get(columnist.source_url)
+                usó_navegador = False
+                if not page.ok:
+                    # Segundo intento con el navegador headless, igual que hace
+                    # la recolección real (solo si está habilitado en el .env).
+                    retry = fetcher.get(columnist.source_url, use_browser=True)
+                    if retry.ok:
+                        page, usó_navegador = retry, True
                 if not page.ok:
                     return {
                         "ok": False,
@@ -155,6 +162,8 @@ def test_columnist(
                 else:
                     refs = extractor.discover_from_html(page.text, page.url)
                     origen = f"HTML con extractor «{extractor.key}»"
+                    if usó_navegador:
+                        origen += " (a través del navegador headless)"
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "origen": "desconocido", "error": str(exc), "articulos": []}
 

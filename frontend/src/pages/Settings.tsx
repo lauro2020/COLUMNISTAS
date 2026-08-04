@@ -26,7 +26,11 @@ export function Settings() {
   const [draft, setDraft] = useState<typeof EMPTY_COLUMNIST | null>(null)
   const [editing, setEditing] = useState<number | null>(null)
   const [testing, setTesting] = useState<number | null>(null)
-  const [testResult, setTestResult] = useState<Record<string, unknown> | null>(null)
+  // El resultado pertenece a la fuente que se probó: se guarda con su id
+  // para no mostrarlo debajo de todas las demás.
+  const [testResult, setTestResult] = useState<
+    { columnistId: number; data: Record<string, unknown> } | null
+  >(null)
 
   const [credOutlet, setCredOutlet] = useState('Reforma')
   const [credCookies, setCredCookies] = useState('')
@@ -79,9 +83,9 @@ export function Settings() {
   const testColumnist = async (id: number) => {
     setTesting(id); setTestResult(null)
     try {
-      setTestResult(await api.testColumnist(id))
+      setTestResult({ columnistId: id, data: await api.testColumnist(id) })
     } catch (error) {
-      setTestResult({ ok: false, error: String(error) })
+      setTestResult({ columnistId: id, data: { ok: false, error: String(error) } })
     } finally {
       setTesting(null)
     }
@@ -302,8 +306,9 @@ export function Settings() {
             </button>
           </div>
 
-          {testResult && testing === null && editing !== columnist.id && (
-            <TestOutput result={testResult} onClose={() => setTestResult(null)} />
+          {testResult?.columnistId === columnist.id && testing === null
+            && editing !== columnist.id && (
+            <TestOutput result={testResult.data} onClose={() => setTestResult(null)} />
           )}
         </div>
       ))}

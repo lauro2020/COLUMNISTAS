@@ -341,6 +341,32 @@ la casilla **«Identificarse como navegador»** en su ficha:
   más que el User-Agent y hace falta el navegador headless
   (`INSTALL_PLAYWRIGHT=true` al construir y `ENABLE_HEADLESS_BROWSER=true`).
 
+### Activar el navegador headless
+
+Hace falta en dos casos: sitios que pintan el texto con JavaScript y sitios
+que devuelven 403 aun con la casilla de navegador activada.
+
+En el archivo `.env`, pon las **dos** variables en `true`:
+
+```ini
+INSTALL_PLAYWRIGHT=true
+ENABLE_HEADLESS_BROWSER=true
+```
+
+Y reconstruye:
+
+```bash
+docker compose up -d --build
+```
+
+La imagen crece unos 500 MB y la primera construcción tarda bastante más. A
+partir de ahí, cuando una petición normal falle, el sistema reintenta con un
+Chromium de verdad. Es más lento, así que solo se usa como respaldo.
+
+Si un medio devuelve 403 **también** desde el navegador headless, está
+bloqueando activamente la lectura automatizada y no hay forma razonable de
+recolectarlo: tendrás que abrirlo a mano.
+
 ### Reglas que aplica el sistema por ti
 
 No tienes que preocuparte de esto al escribir un extractor, ya está resuelto:
@@ -538,7 +564,8 @@ docker compose exec api python -m app.cli doctor
 
 | Síntoma | Qué mirar |
 |---|---|
-| `HTTP 403 — el medio rechaza a nuestro robot` | Ese sitio (Milenio, entre otros) responde 403 a cualquier cliente que no sea un navegador, incluso para servir su `robots.txt`. En **Ajustes › Columnistas › Editar**, activa **«Identificarse como navegador»** para esa fuente. Si aun así sigue en 403, filtra por algo más que el User-Agent y hace falta el navegador headless. |
+| `HTTP 403 — el medio rechaza a nuestro robot` | Ese sitio responde 403 a cualquier cliente que no sea un navegador, incluso para servir su `robots.txt`. En **Ajustes › Columnistas › Editar**, activa **«Identificarse como navegador»** para esa fuente. |
+| `403 … aun identificándonos como navegador` | El sitio (Milenio, por ejemplo) filtra por algo más que el User-Agent. Activa el navegador headless: ver más abajo. |
 | Reforma dice `redirigió a su pantalla de acceso` | No reconoció tu sesión. Guarda las cookies en **Ajustes › Credenciales** con el medio escrito exactamente `Reforma`. Si ya estaban, caducaron: vuelve a copiarlas. |
 | `No address associated with hostname` | Es DNS, no scraping: el contenedor no logra traducir el dominio a una dirección. Corre `doctor`. La configuración ya fuerza DNS de Cloudflare y Google, porque el resolutor interno de Docker Desktop falla con algunos periódicos. Si sigue, prueba `docker compose restart` y reinicia Docker Desktop. |
 | No aparece ninguna columna | Pestaña **Fuentes**: ahí se ve el error exacto de cada medio. |

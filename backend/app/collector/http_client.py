@@ -266,13 +266,20 @@ class Fetcher:
     def _describe_status(self, status_code: int) -> str:
         """Traduce el código HTTP a algo accionable."""
         if status_code == 403:
+            if self.browser_identity and settings.enable_headless_browser:
+                return (
+                    "HTTP 403 — el medio rechaza la petición incluso desde el "
+                    "navegador headless. Este sitio bloquea de forma activa la "
+                    "lectura automatizada; por ahora no hay forma razonable de "
+                    "recolectarlo, tendrás que abrirlo a mano."
+                )
             if self.browser_identity:
                 return (
                     "HTTP 403 — el medio sigue rechazando la petición aun "
                     "identificándonos como navegador. Este sitio filtra por algo "
-                    "más que el User-Agent; hace falta el navegador headless "
-                    "(construye con INSTALL_PLAYWRIGHT=true y pon "
-                    "ENABLE_HEADLESS_BROWSER=true en el .env)."
+                    "más que el User-Agent; hace falta el navegador headless. "
+                    "Pon INSTALL_PLAYWRIGHT=true y ENABLE_HEADLESS_BROWSER=true "
+                    "en el archivo .env y ejecuta «docker compose up -d --build»."
                 )
             return (
                 "HTTP 403 — el medio rechaza a nuestro robot. Activa "
@@ -311,11 +318,15 @@ class Fetcher:
 
         host = urlparse(url).netloc
         _respect_rate_limit(host)
+        # Chromium ya manda su propia identificación; solo se sustituye por la
+        # nuestra en las fuentes donde no se pidió identidad de navegador.
+        user_agent = None if self.browser_identity else settings.user_agent
         try:
             with sync_playwright() as pw:
                 browser = pw.chromium.launch(args=["--no-sandbox"])
                 context = browser.new_context(
-                    user_agent=settings.user_agent, locale="es-MX"
+                    user_agent=user_agent, locale="es-MX",
+                    viewport={"width": 1280, "height": 900},
                 )
                 if self.cookies:
                     context.add_cookies([
@@ -323,15 +334,24 @@ class Fetcher:
                         for k, v in self.cookies.items()
                     ])
                 page = context.new_page()
-                page.goto(url, wait_until="domcontentloaded",
-                          timeout=settings.request_timeout_seconds * 1000)
+                response = page.goto(
+                    url, wait_until="domcontentloaded",
+                    timeout=settings.request_timeout_seconds * 1000,
+                )
                 page.wait_for_timeout(1500)
                 html = page.content()
                 final_url = page.url
+                # El navegador también puede recibir un 403: no darlo por bueno.
+                status = response.status if response is not None else 200
                 browser.close()
             return FetchResult(
-                url=final_url, status_code=200, text=html, ok=True,
-                from_browser=True, elapsed_ms=int((time.monotonic() - started) * 1000),
+                url=final_url,
+                status_code=status,
+                text=html,
+                ok=status < 400,
+                from_browser=True,
+                elapsed_ms=int((time.monotonic() - started) * 1000),
+                error=None if status < 400 else self._describe_status(status),
             )
         except Exception as exc:  # noqa: BLE001
             return FetchResult(
