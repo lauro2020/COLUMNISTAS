@@ -50,6 +50,17 @@ services:
     volumes:
       - audiodata:/data/audio
       - piperdata:/data/piper
+    dns:
+      # DNS explícito: el resolutor interno de Docker Desktop falla con algunos
+      # dominios de periódicos (los que van tras Akamai o CloudFront) y devuelve
+      # «No address associated with hostname». Apuntando a Cloudflare y Google
+      # se evita. Si en tu red no puedes usar DNS externo, comenta estas líneas.
+      - ${DNS_PRIMARY:-1.1.1.1}
+      - ${DNS_SECONDARY:-8.8.8.8}
+    dns_opt:
+      # Consultas DNS por TCP: evita que se pierdan las respuestas largas
+      # (las de los CDN traen muchos registros y no caben en un paquete UDP).
+      - use-vc
     command: >
       sh -c "python -m app.cli migrate &&
              python -m app.cli seed &&
@@ -80,6 +91,17 @@ services:
     volumes:
       - audiodata:/data/audio
       - piperdata:/data/piper
+    dns:
+      # DNS explícito: el resolutor interno de Docker Desktop falla con algunos
+      # dominios de periódicos (los que van tras Akamai o CloudFront) y devuelve
+      # «No address associated with hostname». Apuntando a Cloudflare y Google
+      # se evita. Si en tu red no puedes usar DNS externo, comenta estas líneas.
+      - ${DNS_PRIMARY:-1.1.1.1}
+      - ${DNS_SECONDARY:-8.8.8.8}
+    dns_opt:
+      # Consultas DNS por TCP: evita que se pierdan las respuestas largas
+      # (las de los CDN traen muchos registros y no caben en un paquete UDP).
+      - use-vc
     command: celery -A app.tasks.celery_app worker --loglevel=INFO --concurrency=4
 
   # ---------------------------------------------------------------------------

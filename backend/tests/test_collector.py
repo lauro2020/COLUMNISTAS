@@ -132,3 +132,84 @@ def test_token_de_sesion():
     token = create_token()
     assert decode_token(token)["sub"] == "owner"
     assert decode_token("token.falso.xxx") is None
+
+
+# ---------------------------------------------------------------------------
+# Fallos de resolución de nombres (DNS)
+# ---------------------------------------------------------------------------
+import socket  # noqa: E402
+
+from app.collector.http_client import alternate_host_url, is_dns_error  # noqa: E402
+
+
+@pytest.mark.parametrize("mensaje", [
+    "[Errno -5] No address associated with hostname",
+    "[Errno -2] Name or service not known",
+    "nodename nor servname provided, or not known",
+    "Temporary failure in name resolution",
+])
+def test_se_reconocen_los_fallos_de_dns(mensaje):
+    assert is_dns_error(httpx.ConnectError(mensaje)) is True
+
+
+def test_no_confunde_otros_fallos_con_dns():
+    assert is_dns_error(httpx.ConnectError("[Errno 111] Connection refused")) is False
+    assert is_dns_error(httpx.ReadTimeout("se acabó el tiempo")) is False
+    assert is_dns_error(socket.gaierror(-5, "lo que sea")) is True
+
+
+def test_alternar_el_dominio_con_y_sin_www():
+    assert alternate_host_url("https://www.reforma.com/autor/") == "https://reforma.com/autor/"
+    assert alternate_host_url("https://reforma.com/autor/") == "https://www.reforma.com/autor/"
+    assert alternate_host_url("no-es-una-url") is None
+
+
+@respx.mock
+def test_si_el_dominio_no_resuelve_se_prueba_la_otra_variante():
+    respx.get("https://www.medio.test/autor/").mock(
+        side_effect=httpx.ConnectError("[Errno -5] No address associated with hostname")
+    )
+    respx.get("https://medio.test/autor/").mock(
+        return_value=httpx.Response(200, text="la columna")
+    )
+
+    with Fetcher() as fetcher:
+        resultado = fetcher.get("https://www.medio.test/autor/")
+
+    assert resultado.ok
+    assert resultado.text == "la columna"
+    assert fetcher.host_swaps == {"www.medio.test": "medio.test"}
+
+
+@respx.mock
+def test_si_ninguna_variante_resuelve_el_error_es_claro():
+    respx.get("https://www.medio.test/autor/").mock(
+        side_effect=httpx.ConnectError("[Errno -5] No address associated with hostname")
+    )
+    respx.get("https://medio.test/autor/").mock(
+        side_effect=httpx.ConnectError("[Errno -5] No address associated with hostname")
+    )
+
+    with Fetcher() as fetcher:
+        resultado = fetcher.get("https://www.medio.test/autor/")
+
+    assert resultado.ok is False
+    assert "no se pudo resolver el dominio" in resultado.error.lower()
+    assert "doctor" in resultado.error, "el mensaje debe decir cómo diagnosticarlo"
+    assert fetcher.host_swaps == {}
+
+
+@respx.mock
+def test_un_fallo_de_dns_no_gasta_los_reintentos():
+    """Reintentar no arregla un DNS roto: debe fallar rápido, no en 14 segundos."""
+    ruta = respx.get("https://www.medio.test/autor/").mock(
+        side_effect=httpx.ConnectError("[Errno -5] No address associated with hostname")
+    )
+    respx.get("https://medio.test/autor/").mock(
+        side_effect=httpx.ConnectError("[Errno -5] No address associated with hostname")
+    )
+
+    with Fetcher() as fetcher:
+        fetcher.get("https://www.medio.test/autor/")
+
+    assert ruta.call_count == 1, "una sola petición al dominio original"

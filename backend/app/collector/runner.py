@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import time
+from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -139,23 +140,44 @@ def collect_one(db: Session, columnist: Columnist) -> tuple[list[int], int]:
     extractor = get_extractor(columnist.source_url, columnist.extractor_key)
 
     with Fetcher(cookies=cookies) as fetcher:
-        refs = _discover(columnist, extractor, fetcher, db)
-        refs = _filter_candidates(db, columnist, refs)
+        try:
+            refs = _discover(columnist, extractor, fetcher, db)
+            refs = _filter_candidates(db, columnist, refs)
 
-        new_ids: list[int] = []
-        for ref in refs[:MAX_ARTICLES_PER_SOURCE]:
-            try:
-                article = _extract_article(extractor, ref, fetcher)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("No se pudo extraer %s: %s", ref.url, exc)
-                continue
-            if article is None:
-                continue
-            saved = _persist(db, columnist, article, ref)
-            if saved is not None:
-                new_ids.append(saved)
+            new_ids: list[int] = []
+            for ref in refs[:MAX_ARTICLES_PER_SOURCE]:
+                try:
+                    article = _extract_article(extractor, ref, fetcher)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("No se pudo extraer %s: %s", ref.url, exc)
+                    continue
+                if article is None:
+                    continue
+                saved = _persist(db, columnist, article, ref)
+                if saved is not None:
+                    new_ids.append(saved)
+        finally:
+            # Si hubo que corregir el dominio (con o sin "www.") se guarda,
+            # para no repetir la consulta fallida cada mañana.
+            _apply_host_swaps(db, columnist, fetcher.host_swaps)
 
     return new_ids, len(refs)
+
+
+def _apply_host_swaps(db: Session, columnist: Columnist, swaps: dict[str, str]) -> None:
+    if not swaps:
+        return
+    for field in ("source_url", "feed_url"):
+        value = getattr(columnist, field)
+        if not value:
+            continue
+        parsed = urlparse(value)
+        replacement = swaps.get(parsed.netloc)
+        if replacement:
+            fixed = urlunparse(parsed._replace(netloc=replacement))
+            log.info("Corregido el dominio de %s: %s -> %s", columnist.name, value, fixed)
+            setattr(columnist, field, fixed)
+    db.flush()
 
 
 def _discover(

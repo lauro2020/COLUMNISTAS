@@ -15,9 +15,10 @@ import logging
 import random
 import threading
 import time
+import socket
 import urllib.robotparser
 from dataclasses import dataclass, field
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
 
@@ -78,6 +79,41 @@ _last_request: dict[str, float] = {}
 _rate_lock = threading.Lock()
 
 
+# ---------------------------------------------------------------------------
+# Errores de resolución de nombres (DNS)
+# ---------------------------------------------------------------------------
+#: Mensajes con los que el sistema operativo avisa de que un dominio no resuelve
+DNS_ERROR_HINTS = (
+    "no address associated with hostname",   # EAI_NODATA
+    "name or service not known",             # EAI_NONAME
+    "nodename nor servname provided",        # macOS
+    "temporary failure in name resolution",
+    "getaddrinfo failed",
+)
+
+
+def is_dns_error(exc: BaseException) -> bool:
+    """¿El fallo es «no pude resolver el nombre», y no «no pude conectar»?"""
+    if isinstance(exc, socket.gaierror):
+        return True
+    text = str(exc).lower()
+    return any(hint in text for hint in DNS_ERROR_HINTS)
+
+
+def alternate_host_url(url: str) -> str | None:
+    """Devuelve la misma URL con «www.» añadido o quitado del dominio.
+
+    Varios medios publican solo una de las dos variantes; si la que tenemos
+    guardada no resuelve, merece la pena probar la otra antes de rendirse.
+    """
+    parsed = urlparse(url)
+    host = parsed.netloc
+    if not host:
+        return None
+    swapped = host[4:] if host.startswith("www.") else f"www.{host}"
+    return urlunparse(parsed._replace(netloc=swapped))
+
+
 def _respect_rate_limit(host: str) -> None:
     """Espera lo necesario para no golpear el mismo dominio muy seguido."""
     delay = settings.request_delay_seconds
@@ -109,6 +145,8 @@ class Fetcher:
             cookies=cookies or {},
         )
         self.cookies = cookies or {}
+        #: dominios que hubo que corregir (p. ej. www.medio.com -> medio.com)
+        self.host_swaps: dict[str, str] = {}
 
     # -- ciclo de vida -----------------------------------------------------
     def close(self) -> None:
@@ -121,7 +159,9 @@ class Fetcher:
         self.close()
 
     # -- peticiones --------------------------------------------------------
-    def get(self, url: str, *, use_browser: bool = False) -> FetchResult:
+    def get(
+        self, url: str, *, use_browser: bool = False, allow_host_swap: bool = True
+    ) -> FetchResult:
         if settings.respect_robots and not _robots.allowed(url, settings.user_agent):
             log.warning("robots.txt no permite %s", url)
             return FetchResult(
@@ -155,6 +195,31 @@ class Fetcher:
                 )
             except httpx.HTTPError as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
+
+                # Un fallo de DNS no mejora reintentando: el nombre no resuelve.
+                # Se prueba una sola vez la variante del dominio con o sin "www."
+                # (muchos medios solo publican una de las dos).
+                if is_dns_error(exc):
+                    if allow_host_swap:
+                        alternate = alternate_host_url(url)
+                        if alternate:
+                            log.info("DNS falló en %s; probando %s", host, alternate)
+                            result = self.get(
+                                alternate, use_browser=use_browser, allow_host_swap=False
+                            )
+                            if result.ok:
+                                self.host_swaps[host] = urlparse(alternate).netloc
+                                return result
+                    return FetchResult(
+                        url=url, status_code=0, text="", ok=False,
+                        elapsed_ms=int((time.monotonic() - started) * 1000),
+                        error=(
+                            f"No se pudo resolver el dominio «{host}» desde el "
+                            f"contenedor (DNS). Ejecuta «python -m app.cli doctor» "
+                            f"para ver el diagnóstico completo."
+                        ),
+                    )
+
                 self._backoff(attempt)
 
         elapsed = int((time.monotonic() - started) * 1000)

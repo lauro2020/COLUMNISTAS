@@ -406,6 +406,9 @@ docker compose exec api python -m app.cli audio --missing
 
 # Ver el estado general
 docker compose exec api python -m app.cli status
+
+# Diagnosticar la red: ¿resuelven los dominios? ¿responden por HTTPS?
+docker compose exec api python -m app.cli doctor
 ```
 
 ### Desarrollo sin Docker
@@ -457,7 +460,8 @@ Qué cubren:
   cubren todos los párrafos y van en orden, y que un fallo del proveedor da un
   error controlado.
 - `test_collector.py` — User-Agent, reintentos, cookies de suscriptor, bloqueo
-  por robots.txt, lectura de RSS y cifrado de credenciales.
+  por robots.txt, lectura de RSS, cifrado de credenciales y recuperación ante
+  fallos de DNS (incluida la variante del dominio con o sin «www.»).
 
 El frontend se comprueba con `cd frontend && npm run typecheck`.
 
@@ -507,8 +511,16 @@ texto, así que lo importante es la base de datos.
 
 ## Cuando algo falla
 
+**Empieza siempre por aquí.** Este comando distingue en 30 segundos entre un
+problema de red, un bloqueo del medio y un fallo del extractor:
+
+```bash
+docker compose exec api python -m app.cli doctor
+```
+
 | Síntoma | Qué mirar |
 |---|---|
+| `No address associated with hostname` | Es DNS, no scraping: el contenedor no logra traducir el dominio a una dirección. Corre `doctor`. La configuración ya fuerza DNS de Cloudflare y Google, porque el resolutor interno de Docker Desktop falla con algunos periódicos. Si sigue, prueba `docker compose restart` y reinicia Docker Desktop. |
 | No aparece ninguna columna | Pestaña **Fuentes**: ahí se ve el error exacto de cada medio. |
 | Una fuente en rojo | El medio cambió su web. Prueba `test-source <id>`; si el genérico tampoco saca nada, hará falta ajustar el extractor. |
 | Textos truncados o "de pago" | Faltan las cookies de tu suscripción, o caducaron. Ver [Medios de pago](#medios-de-pago). |
@@ -561,6 +573,12 @@ docker compose logs -f beat      # el reloj de las 6 AM
 10. **Credenciales cifradas con Fernet** (AES-128 + HMAC), con la llave derivada
     de `APP_SECRET_KEY`. Nunca se devuelven al navegador: la app solo muestra
     los *nombres* de las cookies guardadas.
+11. **DNS explícito en los contenedores** (Cloudflare y Google, por TCP). El
+    resolutor interno de Docker Desktop falla con algunos dominios de
+    periódicos —los que van tras Akamai o CloudFront— y devuelve
+    «No address associated with hostname». Además, un fallo de DNS no consume
+    reintentos (no se arregla esperando) y se prueba una vez la variante del
+    dominio con o sin «www.», corrigiendo la URL guardada si esa funciona.
 
 ### Supuestos
 

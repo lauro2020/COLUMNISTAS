@@ -176,6 +176,77 @@ def cmd_test_source(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(_: argparse.Namespace) -> int:
+    """Comprueba la red del contenedor: DNS y acceso HTTPS a cada fuente.
+
+    Es el primer sitio al que mirar cuando una fuente falla: distingue entre
+    «no resuelve el nombre» (problema de red o de DNS de Docker), «no deja
+    entrar» (bloqueo del medio) y «entra pero no encuentra artículos»
+    (problema del extractor).
+    """
+    import socket
+    from urllib.parse import urlparse
+
+    from app.collector.http_client import Fetcher, alternate_host_url
+    from app.models import Columnist
+
+    def resolve(host: str) -> str:
+        try:
+            infos = socket.getaddrinfo(host, 443, socket.AF_INET, socket.SOCK_STREAM)
+            return f"OK  {infos[0][4][0]}"
+        except Exception as exc:  # noqa: BLE001
+            return f"FALLA  ({exc})"
+
+    with session_scope() as db:
+        fuentes = [
+            (c.name, c.outlet, c.source_url)
+            for c in db.scalars(select(Columnist).order_by(Columnist.name)).all()
+        ]
+
+    print("\n" + "=" * 72)
+    print("DIAGNÓSTICO DE RED DESDE EL CONTENEDOR")
+    print("=" * 72)
+
+    print("\n1) ¿Hay internet y DNS en general?")
+    for host in ("example.com", "google.com", "api.openai.com"):
+        print(f"   {host:<28} {resolve(host)}")
+
+    print("\n2) ¿Resuelven los dominios de tus fuentes?")
+    print("   (se prueba también la variante con o sin «www.»)")
+    for name, outlet, url in fuentes:
+        host = urlparse(url).netloc
+        alternate = urlparse(alternate_host_url(url) or "").netloc
+        print(f"\n   {name} — {outlet}")
+        print(f"     {host:<28} {resolve(host)}")
+        if alternate and alternate != host:
+            print(f"     {alternate:<28} {resolve(alternate)}")
+
+    print("\n3) ¿Responden por HTTPS?")
+    with Fetcher() as fetcher:
+        for name, _outlet, url in fuentes:
+            result = fetcher.get(url)
+            if result.ok:
+                estado = f"OK  HTTP {result.status_code}  {len(result.text):,} bytes"
+                if urlparse(result.url).netloc != urlparse(url).netloc:
+                    estado += f"  (respondió {urlparse(result.url).netloc})"
+            else:
+                estado = f"FALLA  {result.error}"
+            print(f"   {name:<32} {estado}")
+
+    print("\n" + "-" * 72)
+    print("Cómo leer esto:")
+    print("  · Si el punto 1 falla       -> el contenedor no tiene red.")
+    print("    Prueba: docker compose restart, o reinicia Docker Desktop.")
+    print("  · Si falla solo un dominio  -> ese medio no resuelve desde aquí.")
+    print("    Si la variante con o sin «www.» sí resuelve, el sistema la")
+    print("    usará automáticamente y corregirá la URL guardada.")
+    print("  · Si resuelve pero el punto 3 da 403 -> el medio bloquea al bot.")
+    print("  · Si el punto 3 va bien y aun así no hay artículos -> es el")
+    print("    extractor: usa «python -m app.cli test-source <id>».")
+    print("-" * 72 + "\n")
+    return 0
+
+
 def cmd_download_piper(args: argparse.Namespace) -> int:
     voice = args.voice
     if voice not in PIPER_PATHS:
@@ -201,6 +272,9 @@ def main() -> int:
     sub.add_parser("migrate", help="crea o actualiza las tablas").set_defaults(func=cmd_migrate)
     sub.add_parser("seed", help="carga los datos iniciales").set_defaults(func=cmd_seed)
     sub.add_parser("status", help="resumen del sistema").set_defaults(func=cmd_status)
+    sub.add_parser(
+        "doctor", help="diagnostica la red: DNS y acceso a cada fuente"
+    ).set_defaults(func=cmd_doctor)
 
     p_collect = sub.add_parser("collect", help="recolecta artículos ahora")
     p_collect.add_argument("--columnist", type=int, help="solo esta fuente (id)")
