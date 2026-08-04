@@ -1,0 +1,117 @@
+services:
+  # ---------------------------------------------------------------------------
+  # Base de datos
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-columnistas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-columnistas}
+      POSTGRES_DB: ${POSTGRES_DB:-columnistas}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-columnistas}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # ---------------------------------------------------------------------------
+  # Cola de trabajos
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # ---------------------------------------------------------------------------
+  # (1) API + servidor de la aplicación
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ./backend
+      args:
+        INSTALL_PLAYWRIGHT: ${INSTALL_PLAYWRIGHT:-false}
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - audiodata:/data/audio
+      - piperdata:/data/piper
+    command: >
+      sh -c "python -m app.cli migrate &&
+             python -m app.cli seed &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/api/health/live')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # (2) Trabajador: recolecta artículos y genera audio
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: ./backend
+      args:
+        INSTALL_PLAYWRIGHT: ${INSTALL_PLAYWRIGHT:-false}
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      api:
+        condition: service_started
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - audiodata:/data/audio
+      - piperdata:/data/piper
+    command: celery -A app.tasks.celery_app worker --loglevel=INFO --concurrency=4
+
+  # ---------------------------------------------------------------------------
+  # (3) Reloj: dispara la recolección a la hora configurada
+  # ---------------------------------------------------------------------------
+  beat:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - beatdata:/data/beat
+    command: celery -A app.tasks.celery_app beat --loglevel=INFO --schedule /data/beat/celerybeat-schedule
+
+  # ---------------------------------------------------------------------------
+  # (4) Aplicación web (PWA) — esto es lo que abres en el navegador
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-8080}:80"
+
+volumes:
+  pgdata:
+  redisdata:
+  audiodata:
+  piperdata:
+  beatdata:
