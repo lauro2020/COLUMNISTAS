@@ -76,7 +76,12 @@ SEED_COLUMNISTS: list[dict] = [
     _c("Jorge G. Castañeda", "El Financiero",
        "https://www.elfinanciero.com.mx/opinion/jorge-castaneda/",
        "semanal", extractor="elfinanciero",
-       notes="Día de publicación sin verificar."),
+       notes=(
+           "OJO: esta URL redirige a la sección de opinión, así que la página "
+           "de autor cambió de dirección. Búscala en el medio y corrígela aquí; "
+           "mientras tanto la fuente avisará del problema en vez de recolectar "
+           "columnas ajenas."
+       )),
     _c("Macario Schettino", "El Financiero",
        "https://www.elfinanciero.com.mx/opinion/macario-schettino/",
        "lunes a viernes", extractor="elfinanciero",
@@ -139,7 +144,12 @@ SEED_COLUMNISTS: list[dict] = [
     # --- Otros medios ------------------------------------------------------
     _c("Javier Solórzano", "La Razón",
        "https://www.razon.com.mx/autor/javier-solorzano-zinser/",
-       "lunes a viernes", notes="De memoria."),
+       "lunes a viernes",
+       notes=(
+           "De memoria. OJO: esta URL redirige a la portada de La Razón, así que "
+           "la página de autor cambió de dirección. Búscala en el medio y "
+           "corrígela aquí."
+       )),
     _c("María Amparo Casar", "UnoTV",
        "https://www.unotv.com/opinion/maria-amparo-casar/",
        "sin verificar",

@@ -267,3 +267,25 @@ def test_un_401_apunta_a_las_credenciales():
         resultado = fetcher.get("https://medio.test/a")
 
     assert "credenciales" in resultado.error.lower()
+
+
+# ---------------------------------------------------------------------------
+# Navegador headless ausente
+# ---------------------------------------------------------------------------
+@respx.mock
+def test_sin_playwright_se_sigue_con_peticiones_normales(monkeypatch):
+    """Activar ENABLE_HEADLESS_BROWSER sin instalarlo no debe romper la fuente."""
+    from app.collector import http_client
+
+    monkeypatch.setattr(settings, "enable_headless_browser", True)
+    monkeypatch.setattr(http_client, "playwright_available", lambda: False)
+
+    respx.get("https://medio.test/autor/").mock(
+        return_value=httpx.Response(200, text="el listado")
+    )
+    with Fetcher() as fetcher:
+        resultado = fetcher.get("https://medio.test/autor/", use_browser=True)
+
+    assert resultado.ok, "debe caer a la petición normal, no fallar"
+    assert resultado.text == "el listado"
+    assert resultado.from_browser is False

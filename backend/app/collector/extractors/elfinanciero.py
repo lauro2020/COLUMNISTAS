@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -28,6 +29,11 @@ FUSION_RE = re.compile(
     r"Fusion\.globalContent\s*=\s*(\{.*?\});\s*Fusion\.", re.DOTALL
 )
 FUSION_ANY_RE = re.compile(r"Fusion\.globalContent\s*=\s*(\{.*?\});", re.DOTALL)
+
+# Rutas canónicas incrustadas en el JSON de la página, en cualquiera de sus formas
+CANONICAL_URL_RE = re.compile(r'"canonical_url"\s*:\s*"(\\?/[^"]{10,240})"')
+# Los artículos de Arc llevan la fecha en la ruta: /2025/03/12/
+ARC_DATED_PATH_RE = re.compile(r"/\d{4}/\d{2}/\d{2}/")
 
 
 class ElFinancieroExtractor(GenericExtractor):
@@ -67,8 +73,45 @@ class ElFinancieroExtractor(GenericExtractor):
                 )
 
         if refs:
-            return list(refs.values())[:25]
+            return self._only_this_author(list(refs.values()), base_url)[:25]
+
+        # Arc guarda el listado en varias formas según la plantilla de la página.
+        # En vez de adivinar la estructura del JSON, se buscan directamente las
+        # rutas canónicas: aparecen igual en todas las variantes.
+        rutas = self._canonical_paths(html, base_url)
+        if rutas:
+            return self._only_this_author(rutas, base_url)[:25]
+
         return super().discover_from_html(html, base_url)
+
+    @staticmethod
+    def _canonical_paths(html: str, base_url: str) -> list[ArticleRef]:
+        """Saca del HTML las rutas de artículo con fecha (/2025/03/12/…)."""
+        refs: dict[str, ArticleRef] = {}
+        for raw in CANONICAL_URL_RE.findall(html or ""):
+            path = raw.replace("\\/", "/")
+            if not ARC_DATED_PATH_RE.search(path):
+                continue
+            url = normalize.canonicalize_url(path, base_url)
+            refs.setdefault(url, ArticleRef(url=url))
+        return list(refs.values())
+
+    @staticmethod
+    def _only_this_author(refs: list[ArticleRef], base_url: str) -> list[ArticleRef]:
+        """Quedarse con lo que cuelga de la ruta del autor, si hay algo.
+
+        En El Financiero las columnas viven en
+        `/opinion/<autor>/<año>/<mes>/<día>/<titular>/`, así que el prefijo
+        distingue sin ambigüedad lo suyo de lo que asoma en la barra lateral.
+        """
+        prefijo = urlparse(base_url).path.rstrip("/").lower()
+        if not prefijo or prefijo == "/opinion":
+            return refs
+        propios = [
+            r for r in refs
+            if urlparse(r.url).path.lower().startswith(f"{prefijo}/")
+        ]
+        return propios or refs
 
     # ------------------------------------------------------------------
     # Extracción

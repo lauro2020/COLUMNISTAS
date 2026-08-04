@@ -219,3 +219,91 @@ def test_las_fuentes_sin_url_de_autor_llegan_desactivadas():
     for entrada in SEED_COLUMNISTS:
         if not entrada["active"]:
             assert "DESACTIVADO" in (entrada["notes"] or ""), entrada["name"]
+
+
+# ---------------------------------------------------------------------------
+# Redirecciones que cambian de página: no son del autor
+# ---------------------------------------------------------------------------
+from app.collector.extractors.generic import redirected_away  # noqa: E402
+
+
+@pytest.mark.parametrize("pedida,final,esperado", [
+    # Casos reales observados en producción
+    ("https://www.elfinanciero.com.mx/opinion/jorge-castaneda/",
+     "https://www.elfinanciero.com.mx/opinion/", True),
+    ("https://www.razon.com.mx/autor/javier-solorzano-zinser/",
+     "https://www.razon.com.mx", True),
+    # Cambiar de dominio (www) o bajar a una subruta es legítimo
+    ("https://www.codigomagenta.com.mx/seccion/que-alguien-me-explique/",
+     "https://codigomagenta.com.mx/seccion/que-alguien-me-explique/", False),
+    ("https://medio.test/autores/x/", "https://medio.test/autores/x/pagina/2", False),
+    ("https://medio.test/autores/x/", "https://medio.test/autores/x/", False),
+])
+def test_se_detecta_cuando_el_medio_nos_manda_a_otra_pagina(pedida, final, esperado):
+    assert redirected_away(pedida, final) is esperado
+
+
+def test_discover_avisa_en_vez_de_recolectar_columnas_ajenas():
+    """Si la página de autor redirige a la sección, hay que parar y avisar."""
+    class FetcherFalso:
+        def get(self, url, **kwargs):
+            from app.collector.http_client import FetchResult
+            return FetchResult(
+                url="https://medio.test/opinion/",   # <- la sección, no el autor
+                status_code=200, text=fixtures.AUTHOR_PAGE, ok=True,
+            )
+
+    with pytest.raises(RuntimeError, match="ya no es suya"):
+        GenericExtractor().discover("https://medio.test/opinion/fulano/", FetcherFalso())
+
+
+def test_se_prefieren_los_enlaces_que_cuelgan_de_la_ruta_del_autor():
+    html = """
+    <html><body><main>
+      <a href="/opinion/fulano/2026/08/04/su-columna-de-hoy/">Su columna de hoy</a>
+      <a href="/opinion/fulano/2026/08/01/otra-columna-suya/">Otra columna suya</a>
+      <a href="/opinion/mengano/2026/08/04/columna-de-otro/">Columna de otro</a>
+      <a href="/politica/2026/08/04/una-nota-cualquiera/">Una nota cualquiera</a>
+    </main></body></html>
+    """
+    refs = GenericExtractor().discover_from_html(html, "https://medio.test/opinion/fulano/")
+    urls = {r.url for r in refs}
+
+    assert len(refs) == 2
+    assert all("/opinion/fulano/" in u for u in urls)
+    assert not any("mengano" in u for u in urls)
+
+
+def test_si_nada_cuelga_de_la_ruta_del_autor_no_se_filtra_nada():
+    """El Universal lista en /autores/x/ pero publica en /opinion/x/: no filtrar."""
+    html = """
+    <html><body><main>
+      <a href="/opinion/fulano/una-columna-larga-de-verdad/">Una columna</a>
+      <a href="/opinion/fulano/otra-columna-larga-de-verdad/">Otra columna</a>
+    </main></body></html>
+    """
+    refs = GenericExtractor().discover_from_html(html, "https://medio.test/autores/fulano/")
+    assert len(refs) == 2
+
+
+# ---------------------------------------------------------------------------
+# El Financiero: listados que no vienen en Fusion.globalContent
+# ---------------------------------------------------------------------------
+def test_elfinanciero_encuentra_columnas_por_ruta_canonica():
+    """Riva Palacio y Schettino devolvían 0 con solo mirar Fusion.globalContent."""
+    html = """
+    <html><body><script>
+      var a = {"canonical_url":"/opinion/raymundo-riva-palacio/2026/08/04/el-reacomodo/"};
+      var b = {"canonical_url":"\\/opinion\\/raymundo-riva-palacio\\/2026\\/08\\/01\\/otra\\/"};
+      var c = {"canonical_url":"/opinion/otro-autor/2026/08/03/no-es-suya/"};
+      var d = {"canonical_url":"/opinion/"};
+    </script></body></html>
+    """
+    refs = ElFinancieroExtractor().discover_from_html(
+        html, "https://www.elfinanciero.com.mx/opinion/raymundo-riva-palacio/"
+    )
+    urls = {r.url for r in refs}
+
+    assert len(refs) == 2, "solo sus dos columnas"
+    assert all("raymundo-riva-palacio" in u for u in urls)
+    assert not any("otro-autor" in u for u in urls)

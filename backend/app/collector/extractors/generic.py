@@ -38,6 +38,22 @@ SKIP_PATH = re.compile(
 ARTICLE_PATH = re.compile(r"/\d{4}/\d{2}/|/[a-z0-9]+(?:-[a-z0-9]+){2,}", re.IGNORECASE)
 
 
+def redirected_away(requested: str, final: str) -> bool:
+    """¿El medio nos llevó a una página distinta de la que pedimos?
+
+    Pasa cuando una página de autor deja de existir: el medio responde 301 a la
+    sección general o a la portada. Recolectar de ahí llenaría la bandeja con
+    columnas de otras personas, así que hay que detectarlo y avisar.
+
+    Cambiar de dominio (www ↔ sin www) o bajar a una subruta no cuenta.
+    """
+    pedida = urlparse(requested).path.rstrip("/").lower()
+    llegada = urlparse(final or "").path.rstrip("/").lower()
+    if not pedida or pedida == llegada:
+        return False
+    return not llegada.startswith(pedida)
+
+
 class GenericExtractor(BaseExtractor):
     key = "generic"
     domains = ()
@@ -59,6 +75,17 @@ class GenericExtractor(BaseExtractor):
                 result = fetcher.get(source_url, use_browser=True)
             if not result.ok:
                 raise RuntimeError(result.error or "no se pudo abrir la página del autor")
+
+        # Si el medio nos mandó a otra parte, lo que hay ahí NO es de este autor.
+        if redirected_away(source_url, result.url):
+            raise RuntimeError(
+                f"La página de este autor redirige a «{result.url}», que ya no es "
+                f"suya (suele ser la sección de opinión o la portada). Si "
+                f"recolectáramos de ahí, guardaríamos columnas de otras personas. "
+                f"Ábrela en el navegador, copia la dirección correcta y corrígela "
+                f"en Ajustes › Columnistas › Editar."
+            )
+
         return self.discover_from_html(result.text, result.url)
 
     def discover_from_html(self, html: str, base_url: str) -> list[ArticleRef]:
@@ -93,7 +120,25 @@ class GenericExtractor(BaseExtractor):
                 url=absolute, title=title if len(title) > 12 else None
             )
 
-        return list(refs.values())[:25]
+        return self._prefer_author_paths(list(refs.values()), base_url)[:25]
+
+    @staticmethod
+    def _prefer_author_paths(refs: list[ArticleRef], base_url: str) -> list[ArticleRef]:
+        """Si el medio cuelga los artículos bajo la ruta del autor, quedarse con esos.
+
+        Muchos periódicos usan `/opinion/<autor>/<titular>`. En esas páginas los
+        enlaces a columnas de OTRAS personas (los del sidebar, «lo más leído»…)
+        no cuelgan de esa ruta, así que filtrarlos evita atribuirle a alguien lo
+        que no escribió. Si el medio no sigue ese esquema, no se filtra nada.
+        """
+        prefijo = urlparse(base_url).path.rstrip("/").lower()
+        if not prefijo or prefijo == "/":
+            return refs
+        propios = [
+            r for r in refs
+            if urlparse(r.url).path.lower().startswith(f"{prefijo}/")
+        ]
+        return propios or refs
 
     # ------------------------------------------------------------------
     def extract(self, url: str, fetcher: Fetcher) -> ExtractedArticle | None:

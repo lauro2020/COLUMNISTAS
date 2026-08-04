@@ -18,6 +18,7 @@ import time
 import socket
 import urllib.robotparser
 from dataclasses import dataclass, field
+from functools import lru_cache
 from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
@@ -114,6 +115,27 @@ def alternate_host_url(url: str) -> str | None:
     return urlunparse(parsed._replace(netloc=swapped))
 
 
+@lru_cache(maxsize=1)
+def playwright_available() -> bool:
+    """¿Está Playwright instalado en esta imagen?
+
+    Si alguien pone ENABLE_HEADLESS_BROWSER=true sin haber construido con
+    INSTALL_PLAYWRIGHT=true, lo correcto es seguir con peticiones normales,
+    no romper todas las fuentes que pedían navegador.
+    """
+    try:
+        import playwright.sync_api  # noqa: F401
+    except ImportError:
+        log.warning(
+            "ENABLE_HEADLESS_BROWSER está activado pero la imagen no trae "
+            "Playwright. Se seguirá con peticiones normales. Para instalarlo, "
+            "pon INSTALL_PLAYWRIGHT=true en el .env y ejecuta "
+            "«docker compose up -d --build»."
+        )
+        return False
+    return True
+
+
 def _respect_rate_limit(host: str) -> None:
     """Espera lo necesario para no golpear el mismo dominio muy seguido."""
     delay = settings.request_delay_seconds
@@ -204,7 +226,7 @@ class Fetcher:
                 error="Bloqueado por robots.txt",
             )
 
-        if use_browser and settings.enable_headless_browser:
+        if use_browser and settings.enable_headless_browser and playwright_available():
             return self._get_with_browser(url)
 
         host = urlparse(url).netloc
@@ -266,7 +288,8 @@ class Fetcher:
     def _describe_status(self, status_code: int) -> str:
         """Traduce el código HTTP a algo accionable."""
         if status_code == 403:
-            if self.browser_identity and settings.enable_headless_browser:
+            if self.browser_identity and settings.enable_headless_browser \
+                    and playwright_available():
                 return (
                     "HTTP 403 — el medio rechaza la petición incluso desde el "
                     "navegador headless. Este sitio bloquea de forma activa la "
