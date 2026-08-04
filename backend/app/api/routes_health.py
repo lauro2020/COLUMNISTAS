@@ -15,7 +15,6 @@ from app.models import (
     AudioStatus,
     CollectionRun,
     Columnist,
-    RunStatus,
     SourceRun,
 )
 from app.schemas import RunOut, SourceHealth

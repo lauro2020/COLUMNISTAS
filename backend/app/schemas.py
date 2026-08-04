@@ -101,6 +101,7 @@ class ArticleListItem(ORMModel):
     is_archived: bool
     is_favorite: bool
     audio_position_seconds: float
+    audio_id: int | None = None
     audio_status: AudioStatus | None = None
     audio_duration: float | None = None
 

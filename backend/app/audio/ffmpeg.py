@@ -74,7 +74,7 @@ def silence(seconds: float, target: Path) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     _run([
         "ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
-        "-i", f"anullsrc=channel_layout=mono:sample_rate=22050",
+        "-i", "anullsrc=channel_layout=mono:sample_rate=22050",
         "-t", str(seconds), "-b:a", "64k", str(target),
     ])
     return target

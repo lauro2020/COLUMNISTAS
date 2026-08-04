@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import current_user, get_db
 from app.config import settings
-from app.models import Article, Audio, AudioStatus, Columnist, CollectionRun, UserPreference
+from app.models import Article, AudioStatus, CollectionRun, UserPreference
 from app.schemas import (
     ArticleDetail,
     ArticleListItem,
@@ -38,6 +38,7 @@ def _to_item(article: Article) -> ArticleListItem:
     item = ArticleListItem.model_validate(article)
     audio = article.audios[0] if article.audios else None
     if audio:
+        item.audio_id = audio.id
         item.audio_status = audio.status
         item.audio_duration = audio.duration_seconds
     return item
@@ -190,6 +191,7 @@ def get_article(
     detail = ArticleDetail.model_validate(article)
     audio = article.audios[0] if article.audios else None
     if audio:
+        detail.audio_id = audio.id
         detail.audio_status = audio.status
         detail.audio_duration = audio.duration_seconds
         detail.audio = AudioOut.model_validate(audio)

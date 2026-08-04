@@ -25,3 +25,6 @@ data/
 
 # Sistema
 .DS_Store
+
+# Artefactos de compilación de TypeScript
+*.tsbuildinfo
