@@ -227,18 +227,17 @@ export function Reader() {
           {article.body.map((block, index) => {
             const className = `blk${activeIndex === index ? ' active' : ''}`
             const props = {
-              key: index,
               className,
               'data-index': index,
               ref: (node: HTMLElement | null) => { paragraphRefs.current[index] = node },
               onClick: () => seekToParagraph(index),
               dangerouslySetInnerHTML: { __html: block.html || block.text },
             }
-            if (block.type === 'h2') return <h2 {...props} />
-            if (block.type === 'h3') return <h3 {...props} />
-            if (block.type === 'quote') return <blockquote {...props} />
-            if (block.type === 'li') return <p {...props} style={{ paddingLeft: '1rem' }} />
-            return <p {...props} />
+            if (block.type === 'h2') return <h2 key={index} {...props} />
+            if (block.type === 'h3') return <h3 key={index} {...props} />
+            if (block.type === 'quote') return <blockquote key={index} {...props} />
+            if (block.type === 'li') return <p key={index} {...props} style={{ paddingLeft: '1rem' }} />
+            return <p key={index} {...props} />
           })}
         </div>
 

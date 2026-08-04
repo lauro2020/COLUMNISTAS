@@ -88,6 +88,8 @@ services:
   beat:
     build:
       context: ./backend
+      args:
+        INSTALL_PLAYWRIGHT: ${INSTALL_PLAYWRIGHT:-false}
     restart: unless-stopped
     env_file: .env
     depends_on:

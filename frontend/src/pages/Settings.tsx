@@ -189,6 +189,10 @@ export function Settings() {
             {(activeProvider?.voices ?? []).map((voice) => (
               <option key={voice.id} value={voice.id}>{voice.label}</option>
             ))}
+            {/* La voz guardada puede venir de un proveedor que ya no está */}
+            {!(activeProvider?.voices ?? []).some((v) => v.id === prefs.tts_voice) && (
+              <option value={prefs.tts_voice}>{prefs.tts_voice}</option>
+            )}
           </select>
           <span className="hint">
             El cambio se aplica a los audios nuevos. Para oírla en uno ya generado,
