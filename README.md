@@ -144,6 +144,12 @@ openssl rand -hex 32
 
 Copia el resultado y pégalo en `APP_SECRET_KEY`.
 
+> Para `APP_PASSWORD`, usa letras, números y guiones, **sin comillas y sin los
+> símbolos `#` ni `$`**. En un archivo `.env`, todo lo que va después de `#` se
+> descarta como comentario, y `$` lo interpreta Docker como el principio del
+> nombre de una variable. Con cualquiera de los dos, la contraseña que llega al
+> contenedor no es la que escribiste.
+
 > ⚠️ Guarda esa clave. Si la cambias más adelante, las credenciales de los
 > medios que hayas guardado dejarán de poder descifrarse y tendrás que
 > volver a introducirlas.
@@ -666,6 +672,7 @@ docker compose exec api python -m app.cli check-sources
 
 | Síntoma | Qué mirar |
 |---|---|
+| No te deja entrar con tu contraseña | `docker compose exec api python -m app.cli check-password`: te dice si la que tecleas coincide con la que tiene el contenedor, sin mostrarla. Ojo con `#` y `$` en el `.env`: el primero convierte en comentario todo lo que le sigue, y el segundo lo interpreta Docker como una variable. |
 | Al construir: `Package 'ttf-ubuntu-font-family' has no installation candidate` | Playwright intentaba instalar paquetes de Ubuntu sobre Debian. Ya está corregido: la imagen base está fijada a Debian 12 y las bibliotecas se instalan por nombre. Si lo ves, haz `git pull` y vuelve a construir. |
 | `HTTP 403 — el medio rechaza a nuestro robot` | Ese sitio responde 403 a cualquier cliente que no sea un navegador, incluso para servir su `robots.txt`. En **Ajustes › Columnistas › Editar**, activa **«Identificarse como navegador»** para esa fuente. |
 | `403 … aun identificándonos como navegador` | El sitio (Milenio, por ejemplo) filtra por algo más que el User-Agent. Activa el navegador headless: ver más abajo. |

@@ -9,6 +9,7 @@ Cada componente se puede ejecutar y probar por separado:
     python -m app.cli audio --article 12      # genera el audio de un artículo
     python -m app.cli audio --missing         # genera todos los que falten
     python -m app.cli status                  # resumen del sistema
+    python -m app.cli check-password          # ¿por qué no me deja entrar?
     python -m app.cli check-sources           # prueba TODAS las fuentes
     python -m app.cli test-source 3           # prueba una fuente sin guardar
     python -m app.cli download-piper-voice es_MX-ald-medium
@@ -277,6 +278,70 @@ def cmd_doctor(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_check_password(_: argparse.Namespace) -> int:
+    """Comprueba si una contraseña coincide con la que espera el contenedor.
+
+    No imprime la contraseña nunca. Sirve para distinguir «la estoy tecleando
+    mal» de «el contenedor tiene otra distinta de la que puse en el .env».
+    """
+    import getpass
+
+    from app.security import verify_password
+
+    actual = settings.app_password
+
+    print("\nContraseña que espera el contenedor ahora mismo:")
+    print(f"  · longitud: {len(actual)} caracteres")
+
+    avisos = []
+    if not actual:
+        avisos.append("está VACÍA: falta APP_PASSWORD en el .env")
+    if actual == "columnistas":
+        avisos.append("es la de por defecto: APP_PASSWORD no llegó al contenedor")
+    if "<<<" in actual or ">>>" in actual:
+        avisos.append("conserva los signos <<< >>> del archivo de ejemplo")
+    if actual != actual.strip():
+        avisos.append("empieza o acaba con espacios, seguramente sin querer")
+    if len(actual) >= 2 and actual[0] == actual[-1] and actual[0] in "\"'":
+        avisos.append("empieza y acaba con comillas: puede que sobren")
+
+    for aviso in avisos:
+        print(f"  ⚠ {aviso}")
+    if not avisos:
+        print("  · sin nada raro a primera vista")
+
+    print("\nEscribe la contraseña que estás tecleando en la app.")
+    print("(no se ve al escribir; pulsa Enter al terminar)")
+    try:
+        candidata = getpass.getpass("  contraseña: ")
+    except (EOFError, KeyboardInterrupt):
+        print("\nCancelado.")
+        return 1
+
+    print()
+    if verify_password(candidata):
+        print("  ✓ COINCIDE. Con esa contraseña deberías poder entrar.")
+        print("    Si la app la sigue rechazando, recarga la página en el")
+        print("    navegador o el teléfono para descartar una copia vieja.")
+        return 0
+
+    print("  ✗ NO COINCIDE con la que tiene el contenedor.")
+    print()
+    print("  Causas habituales, en orden:")
+    print("   1. Cambiaste APP_PASSWORD en el .env pero no reiniciaste:")
+    print("        docker compose up -d")
+    print("   2. Tu contraseña lleva una almohadilla «#». En un archivo .env")
+    print("      todo lo que va después de # se descarta, así que al")
+    print("      contenedor le llega solo el trozo de antes.")
+    print("   3. Lleva un signo de dólar «$». Docker lo interpreta como el")
+    print("      principio del nombre de una variable y lo sustituye.")
+    print("   4. La escribiste entre comillas en el .env y quedaron dentro.")
+    print()
+    print("  Lo más simple: pon en el .env una contraseña de letras, números")
+    print("  y guiones, sin comillas ni símbolos, y ejecuta docker compose up -d")
+    return 1
+
+
 def cmd_check_sources(args: argparse.Namespace) -> int:
     """Prueba TODAS las fuentes de una vez, sin guardar nada.
 
@@ -376,6 +441,9 @@ def main() -> int:
     sub.add_parser(
         "doctor", help="diagnostica la red: DNS y acceso a cada fuente"
     ).set_defaults(func=cmd_doctor)
+    sub.add_parser(
+        "check-password", help="comprueba si una contraseña es la que espera la app"
+    ).set_defaults(func=cmd_check_password)
 
     p_collect = sub.add_parser("collect", help="recolecta artículos ahora")
     p_collect.add_argument("--columnist", type=int, help="solo esta fuente (id)")

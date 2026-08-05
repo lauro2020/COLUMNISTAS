@@ -35,10 +35,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   const response = await fetch(path, { ...options, headers })
 
-  if (response.status === 401) {
+  // Un 401 al entrar significa "contraseña incorrecta", no "sesión caducada":
+  // ahí todavía no hay sesión que caducar. Se deja pasar para que el mensaje
+  // que llega del servidor sea el que se vea.
+  const esInicioDeSesion = path.startsWith('/api/auth/login')
+
+  if (response.status === 401 && !esInicioDeSesion) {
     setToken(null)
     window.dispatchEvent(new CustomEvent('columnistas:logout'))
-    throw new ApiError(401, 'La sesión caducó')
+    throw new ApiError(401, 'La sesión caducó. Vuelve a entrar con tu contraseña.')
   }
   if (!response.ok) {
     let detail = `Error ${response.status}`

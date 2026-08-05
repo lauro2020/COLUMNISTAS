@@ -347,3 +347,23 @@ def test_la_documentacion_de_la_api_no_es_publica_por_defecto():
 
     assert settings.enable_api_docs is False
     assert TestClient(app).get("/api/docs").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# El mensaje correcto al no poder entrar
+# ---------------------------------------------------------------------------
+def test_una_contrasena_incorrecta_dice_que_es_incorrecta(monkeypatch):
+    """No debe confundirse con «la sesión caducó»: aún no hay sesión."""
+    from fastapi.testclient import TestClient
+
+    from app.api import routes_auth
+    from app.main import app
+
+    monkeypatch.setattr(routes_auth.time, "sleep", lambda s: None)
+    routes_auth._failures.clear()
+
+    respuesta = TestClient(app).post("/api/auth/login", json={"password": "no-es"})
+
+    assert respuesta.status_code == 401
+    assert respuesta.json()["detail"] == "Contraseña incorrecta"
+    routes_auth._failures.clear()
