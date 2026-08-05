@@ -209,3 +209,29 @@ def delete_audio_files(audios: list[Audio]) -> int:
             path.unlink(missing_ok=True)
             removed += 1
     return removed
+
+
+def delete_orphan_files(known_paths: set[str], *, min_age_hours: int = 24) -> int:
+    """Borra MP3 que ya no pertenecen a ningún artículo.
+
+    Pasa cuando eliminas un columnista: sus artículos se van en cascada, pero
+    los archivos se quedaban ocupando disco para siempre. Se ignoran los
+    recién creados para no pisar una generación en curso.
+    """
+    root = audio_root()
+    limite = dt.datetime.now().timestamp() - min_age_hours * 3600
+    removed = 0
+    for path in root.rglob("*.mp3"):
+        relative = path.relative_to(root).as_posix()
+        if relative in known_paths:
+            continue
+        try:
+            if path.stat().st_mtime > limite:
+                continue
+            path.unlink()
+            removed += 1
+        except OSError:  # noqa: PERF203 - un archivo que no se deja borrar no es fatal
+            log.warning("No se pudo borrar el audio huérfano %s", path)
+    if removed:
+        log.info("Borrados %s audios huérfanos", removed)
+    return removed

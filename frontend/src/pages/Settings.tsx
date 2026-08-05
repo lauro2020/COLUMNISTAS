@@ -269,6 +269,21 @@ export function Settings() {
               se identifica como navegador
             </span>
           )}
+
+          {columnist.notes && (
+            <p
+              className="faint"
+              style={{
+                marginTop: '.5rem',
+                paddingLeft: '.6rem',
+                borderLeft: '2px solid var(--line)',
+                color: /DESACTIVADO|OJO/.test(columnist.notes)
+                  ? 'var(--warn)' : undefined,
+              }}
+            >
+              {columnist.notes}
+            </p>
+          )}
           {columnist.feed_url && (
             <div className="faint" style={{ wordBreak: 'break-all' }}>RSS: {columnist.feed_url}</div>
           )}
@@ -369,6 +384,16 @@ export function Settings() {
               value={draft.expected_frequency}
               placeholder="diaria, lunes a viernes, semanal…"
               onChange={(e) => setDraft({ ...draft, expected_frequency: e.target.value })}
+            />
+          </div>
+
+          <div className="field">
+            <label>Notas</label>
+            <textarea
+              rows={2}
+              value={draft.notes}
+              placeholder="Para tu memoria: nombre de la columna, qué falta por revisar…"
+              onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
             />
           </div>
 

@@ -641,12 +641,22 @@ docker compose logs -f beat      # el reloj de las 6 AM
 8. **Peticiones parciales (HTTP Range) implementadas a mano** en el endpoint del
    audio, y replicadas dentro del service worker sobre la caché. Sin eso no
    podrías saltar dentro de un audio descargado.
-9. **Un solo usuario con contraseña.** No hay registro, roles ni recuperación de
-   contraseña: es una app personal, y añadirlos sería complejidad sin beneficio.
+9. **Un solo usuario con contraseña**, con bloqueo temporal tras varios
+   intentos fallidos y sin documentación de la API publicada. No hay registro,
+   roles ni recuperación de contraseña: es una app personal, y añadirlos sería
+   complejidad sin beneficio.
 10. **Credenciales cifradas con Fernet** (AES-128 + HMAC), con la llave derivada
     de `APP_SECRET_KEY`. Nunca se devuelven al navegador: la app solo muestra
     los *nombres* de las cookies guardadas.
-11. **DNS explícito en los contenedores** (Cloudflare y Google, por TCP). El
+11. **La primera recolección de cada fuente trae solo dos columnas.** Sin ese
+    tope, estrenar veinte columnistas volcaría el archivo histórico de cada
+    medio en la bandeja de hoy y pagarías la síntesis de voz de todo ello. A
+    partir de la segunda ejecución rige el tope normal.
+12. **Un choque de clave única no tumba la ejecución.** Cada artículo se
+    inserta dentro de su propio punto de guardado: si dos columnistas
+    comparten una columna sindicada, se descarta esa inserción y la
+    recolección continúa.
+13. **DNS explícito en los contenedores** (Cloudflare y Google, por TCP). El
     resolutor interno de Docker Desktop falla con algunos dominios de
     periódicos —los que van tras Akamai o CloudFront— y devuelve
     «No address associated with hostname». Además, un fallo de DNS no consume

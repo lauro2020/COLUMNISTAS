@@ -51,7 +51,15 @@ def redirected_away(requested: str, final: str) -> bool:
     llegada = urlparse(final or "").path.rstrip("/").lower()
     if not pedida or pedida == llegada:
         return False
-    return not llegada.startswith(pedida)
+    if llegada.startswith(pedida):
+        return False
+    # El medio puede reorganizar la ruta sin dejar de ser la página del autor
+    # (p. ej. /opinion/fulano -> /autores/fulano). Mientras el identificador
+    # del autor siga ahí, no es una redirección a otra cosa.
+    slug = pedida.rsplit("/", 1)[-1]
+    if len(slug) >= 6 and slug in llegada:
+        return False
+    return True
 
 
 class GenericExtractor(BaseExtractor):

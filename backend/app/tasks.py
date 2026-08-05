@@ -192,23 +192,42 @@ def generate_missing_audio(limit: int = 50) -> int:
 # ---------------------------------------------------------------------------
 @celery_app.task(name="app.tasks.apply_retention")
 def apply_retention() -> dict:
-    """Borra artículos y audios que superen la retención configurada."""
+    """Borra artículos y audios que superen la retención configurada.
+
+    También barre los MP3 que ya no pertenecen a ningún artículo: si eliminas
+    un columnista, sus artículos se van en cascada pero los archivos no.
+    """
     with session_scope() as db:
         prefs = _prefs(db)
         months = prefs.retention_months
-        if not months:
-            return {"deleted": 0, "note": "retención desactivada"}
+        borrados = removed_files = 0
 
-        cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=months * 30)
-        old = list(
-            db.scalars(
-                select(Article)
-                .where(Article.published_at < cutoff)
-                .where(Article.is_favorite.is_(False))
+        if months:
+            cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=months * 30)
+            old = list(
+                db.scalars(
+                    select(Article)
+                    .where(Article.published_at < cutoff)
+                    .where(Article.is_favorite.is_(False))
+                ).all()
+            )
+            audios = [a for article in old for a in article.audios]
+            removed_files = pipeline.delete_audio_files(audios)
+            for article in old:
+                db.delete(article)
+            borrados = len(old)
+            db.flush()
+
+        conocidos = {
+            path for path in db.scalars(
+                select(Audio.file_path).where(Audio.file_path.is_not(None))
             ).all()
-        )
-        audios = [a for article in old for a in article.audios]
-        removed_files = pipeline.delete_audio_files(audios)
-        for article in old:
-            db.delete(article)
-        return {"deleted": len(old), "files_removed": removed_files}
+        }
+
+    huerfanos = pipeline.delete_orphan_files(conocidos)
+    return {
+        "deleted": borrados,
+        "files_removed": removed_files,
+        "orphans_removed": huerfanos,
+        "note": None if months else "retención desactivada",
+    }

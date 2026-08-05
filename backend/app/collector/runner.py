@@ -18,7 +18,8 @@ import logging
 import time
 from urllib.parse import urlparse, urlunparse
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.collector import dates, normalize, rss
@@ -40,6 +41,10 @@ log = logging.getLogger(__name__)
 
 #: cuántos artículos candidatos se procesan como máximo por fuente y ejecución
 MAX_ARTICLES_PER_SOURCE = 6
+#: la PRIMERA vez que se recolecta una fuente se traen solo los más recientes,
+#: para no volcar el archivo histórico del medio en la bandeja de hoy (ni pagar
+#: la síntesis de voz de veinte columnas viejas por columnista)
+MAX_ARTICLES_FIRST_RUN = 2
 #: no se traen columnas más viejas que esto (evita reprocesar el archivo del medio)
 MAX_AGE_DAYS = 10
 
@@ -146,8 +151,15 @@ def collect_one(db: Session, columnist: Columnist) -> tuple[list[int], int]:
             refs = _discover(columnist, extractor, fetcher, db)
             refs = _filter_candidates(db, columnist, refs)
 
+            es_primera_vez = not db.scalar(
+                select(func.count(Article.id)).where(
+                    Article.columnist_id == columnist.id
+                )
+            )
+            tope = MAX_ARTICLES_FIRST_RUN if es_primera_vez else MAX_ARTICLES_PER_SOURCE
+
             new_ids: list[int] = []
-            for ref in refs[:MAX_ARTICLES_PER_SOURCE]:
+            for ref in refs[:tope]:
                 try:
                     article = _extract_article(extractor, ref, fetcher)
                 except Exception as exc:  # noqa: BLE001
@@ -160,8 +172,13 @@ def collect_one(db: Session, columnist: Columnist) -> tuple[list[int], int]:
                     new_ids.append(saved)
         finally:
             # Si hubo que corregir el dominio (con o sin "www.") se guarda,
-            # para no repetir la consulta fallida cada mañana.
-            _apply_host_swaps(db, columnist, fetcher.host_swaps)
+            # para no repetir la consulta fallida cada mañana. Si esto fallara,
+            # no debe tapar el error real que trajo hasta aquí.
+            try:
+                _apply_host_swaps(db, columnist, fetcher.host_swaps)
+            except Exception:  # noqa: BLE001
+                log.warning("No se pudo guardar el dominio corregido de %s",
+                            columnist.name, exc_info=True)
 
     return new_ids, len(refs)
 
@@ -300,7 +317,18 @@ def _persist(
         is_paywalled=extracted.is_paywalled,
         extractor_used=extracted.extractor,
     )
-    db.add(article)
-    db.flush()
+    # Un choque de clave única (dos columnistas que comparten una columna
+    # sindicada, por ejemplo) no puede tumbar el resto de la ejecución: se
+    # deshace solo esta inserción y la transacción sigue viva.
+    savepoint = db.begin_nested()
+    try:
+        db.add(article)
+        db.flush()
+        savepoint.commit()
+    except IntegrityError:
+        savepoint.rollback()
+        log.info("La base de datos ya tenía este artículo: %s", canonical)
+        return None
+
     log.info("Nuevo artículo: %s — %s", columnist.name, article.title)
     return article.id

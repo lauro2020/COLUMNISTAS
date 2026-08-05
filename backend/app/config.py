@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     app_secret_key: str = "dev-secret-key-cambiala"
     app_password: str = "columnistas"
     auth_token_days: int = 90
+    #: publicar /api/docs. Apagado por defecto: si expones la app a internet,
+    #: no hay razón para enseñar el mapa de la API a quien pase por ahí.
+    enable_api_docs: bool = False
+    #: intentos fallidos de contraseña seguidos antes de bloquear un rato
+    login_max_attempts: int = 10
+    login_lockout_minutes: int = 15
 
     # --- Base de datos / cola ---
     database_url: str = "postgresql+psycopg://columnistas:columnistas@db:5432/columnistas"

@@ -289,3 +289,61 @@ def test_sin_playwright_se_sigue_con_peticiones_normales(monkeypatch):
     assert resultado.ok, "debe caer a la petición normal, no fallar"
     assert resultado.text == "el listado"
     assert resultado.from_browser is False
+
+
+# ---------------------------------------------------------------------------
+# Login: freno a la fuerza bruta
+# ---------------------------------------------------------------------------
+def test_el_login_se_bloquea_tras_varios_intentos_fallidos(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.api import routes_auth
+    from app.main import app
+
+    monkeypatch.setattr(settings, "login_max_attempts", 3)
+    monkeypatch.setattr(settings, "login_lockout_minutes", 15)
+    monkeypatch.setattr(routes_auth.time, "sleep", lambda s: None)
+    routes_auth._failures.clear()
+
+    client = TestClient(app)
+    codigos = [
+        client.post("/api/auth/login", json={"password": "mala"}).status_code
+        for _ in range(4)
+    ]
+
+    assert codigos[:3] == [401, 401, 401], "los primeros intentos solo se rechazan"
+    assert codigos[3] == 429, "a partir del tope se bloquea"
+
+    bloqueado = client.post("/api/auth/login", json={"password": settings.app_password})
+    assert bloqueado.status_code == 429, "ni con la buena mientras está bloqueado"
+    assert "minuto" in bloqueado.json()["detail"]
+
+    routes_auth._failures.clear()
+
+
+def test_un_login_correcto_borra_los_intentos_previos(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.api import routes_auth
+    from app.main import app
+
+    monkeypatch.setattr(settings, "login_max_attempts", 3)
+    monkeypatch.setattr(routes_auth.time, "sleep", lambda s: None)
+    routes_auth._failures.clear()
+
+    client = TestClient(app)
+    client.post("/api/auth/login", json={"password": "mala"})
+    client.post("/api/auth/login", json={"password": "mala"})
+    assert client.post(
+        "/api/auth/login", json={"password": settings.app_password}
+    ).status_code == 200
+    assert routes_auth._failures == {}, "el contador se reinicia al acertar"
+
+
+def test_la_documentacion_de_la_api_no_es_publica_por_defecto():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    assert settings.enable_api_docs is False
+    assert TestClient(app).get("/api/docs").status_code == 404

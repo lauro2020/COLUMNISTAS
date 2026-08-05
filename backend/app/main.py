@@ -27,8 +27,8 @@ app = FastAPI(
     title="Columnistas",
     description="Lectura y escucha diaria de columnas de opinión.",
     version="1.0.0",
-    docs_url="/api/docs",
-    openapi_url="/api/openapi.json",
+    docs_url="/api/docs" if settings.enable_api_docs else None,
+    openapi_url="/api/openapi.json" if settings.enable_api_docs else None,
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1024)
@@ -57,4 +57,8 @@ app.include_router(routes_health.router)
 
 @app.get("/api")
 def root() -> dict:
-    return {"app": "Columnistas", "version": "1.0.0", "docs": "/api/docs"}
+    return {
+        "app": "Columnistas",
+        "version": "1.0.0",
+        "docs": "/api/docs" if settings.enable_api_docs else "desactivada (ENABLE_API_DOCS)",
+    }
