@@ -8,7 +8,7 @@ import { Layout } from '../components/Layout'
 import { Empty, Loading, formatDate, formatDateTime, todayISO } from '../components/ui'
 import { useApp } from '../state/AppContext'
 import { usePlayer } from '../state/PlayerContext'
-import { cacheDayOffline } from '../offline'
+import { cacheDayOffline, offlineSupported, OFFLINE_UNSUPPORTED_REASON } from '../offline'
 
 export function Inbox() {
   const { notify } = useApp()
@@ -134,9 +134,19 @@ export function Inbox() {
             </div>
 
             <div className="row" style={{ marginTop: '.8rem' }}>
-              <button className="btn small" onClick={download} disabled={busy === 'offline'}>
-                {busy === 'offline' ? 'Descargando…' : '⤓ Descargar para sin conexión'}
-              </button>
+              {offlineSupported() ? (
+                <button className="btn small" onClick={download} disabled={busy === 'offline'}>
+                  {busy === 'offline' ? 'Descargando…' : '⤓ Descargar para sin conexión'}
+                </button>
+              ) : (
+                <button
+                  className="btn small"
+                  onClick={() => notify(OFFLINE_UNSUPPORTED_REASON)}
+                  title={OFFLINE_UNSUPPORTED_REASON}
+                >
+                  ⤓ Sin conexión no disponible
+                </button>
+              )}
               <button className="btn small" onClick={markAll}>Marcar todo como leído</button>
               <button className="btn small ghost" onClick={collectNow} disabled={busy === 'collect'}>
                 {busy === 'collect' ? 'Buscando…' : '↻ Buscar ahora'}

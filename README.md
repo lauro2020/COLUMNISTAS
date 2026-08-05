@@ -215,7 +215,66 @@ recolectar»** y genera solo el de las columnas que te interesen, desde el botó
 
 ## Instalar en el teléfono
 
-La app está pensada para vivir en tu pantalla de inicio.
+### Primero: que el teléfono llegue a la app
+
+`http://localhost:8080` **solo funciona en la computadora donde corre**. En el
+teléfono, «localhost» es el propio teléfono, y ahí no hay nada. Hay tres
+caminos, de menos a más completo:
+
+#### A. Por la red de tu casa (2 minutos, funciona hoy)
+
+Averigua la dirección de tu Mac en la red:
+
+```bash
+ipconfig getifaddr en0        # WiFi
+ipconfig getifaddr en1        # si estás por cable
+```
+
+Te devuelve algo como `192.168.1.42`. En el teléfono, **conectado al mismo
+WiFi**, abre `http://192.168.1.42:8080`.
+
+Con esto puedes **leer y escuchar** con normalidad. Lo que NO vas a tener:
+
+| | Por qué |
+|---|---|
+| Instalar en la pantalla de inicio | Los navegadores solo lo permiten por HTTPS |
+| Descargar para uso sin conexión | El service worker necesita HTTPS |
+| Controles en la pantalla de bloqueo | La Media Session API necesita HTTPS |
+| Que funcione fuera de tu casa | Es una dirección de tu red local |
+
+La app te lo dice: el botón de descarga aparece como «Sin conexión no
+disponible» y explica el motivo al tocarlo.
+
+> La dirección `192.168.x.x` puede cambiar al reiniciar el router. Si un día
+> deja de abrir, vuelve a ejecutar `ipconfig getifaddr en0`.
+
+#### B. Con Tailscale (unos 15 minutos, gratis, es lo que recomiendo)
+
+Te da HTTPS de verdad y funciona **desde cualquier lugar**, sin abrir puertos
+en el router ni comprar un dominio. Tu Mac sigue siendo el servidor.
+
+1. Instala [Tailscale](https://tailscale.com/download) en la Mac y en el
+   teléfono, e inicia sesión con la misma cuenta en ambos.
+2. En la Mac:
+
+   ```bash
+   tailscale serve --bg 8080
+   tailscale serve status
+   ```
+
+3. Te dará una dirección `https://tu-mac.algo.ts.net`. Ábrela en el teléfono:
+   ya es HTTPS, así que se puede instalar, descargar para sin conexión y usar
+   los controles de la pantalla de bloqueo.
+
+Sigue con la limitación de que la Mac tiene que estar encendida a las 6 de la
+mañana para que la recolección ocurra sola.
+
+#### C. En un servidor (lo definitivo)
+
+Ver [Desplegar en un servidor](#desplegar-en-un-servidor). Es lo único que hace
+que la recolección de las 06:00 ocurra siempre, esté tu Mac encendida o no.
+
+### Después: instalarla
 
 **iPhone (Safari):** abre la dirección de la app → botón Compartir →
 *Añadir a pantalla de inicio*.
@@ -608,7 +667,8 @@ docker compose exec api python -m app.cli check-sources
 | Textos truncados o "de pago" | Faltan las cookies de tu suscripción, o caducaron. Ver [Medios de pago](#medios-de-pago). |
 | El audio dice "falló" | Casi siempre es la clave de OpenAI (ausente, sin saldo o con el límite alcanzado). El error completo se ve al abrir el artículo. |
 | El audio no suena en el teléfono | Descarga el día primero si estás sin conexión; y comprueba que la app va por HTTPS. |
-| La app no se instala | Solo se puede instalar por HTTPS (o en `localhost`). |
+| La app no se instala en el teléfono | Solo se puede instalar por HTTPS (o en `localhost`). Por IP de red local no. Ver [Instalar en el teléfono](#instalar-en-el-teléfono). |
+| El teléfono no abre la app | `localhost` es el propio teléfono. Usa la IP de la Mac (`ipconfig getifaddr en0`) o Tailscale. |
 | Todo va lento al recolectar | Es a propósito: hay una espera mínima entre peticiones al mismo medio. Se ajusta con `REQUEST_DELAY_SECONDS`. |
 
 Ver los registros:

@@ -5,7 +5,7 @@ import { api } from '../api/client'
 import type { Columnist, Credential, TtsProvider } from '../api/types'
 import { Layout } from '../components/Layout'
 import { Loading, formatDateTime } from '../components/ui'
-import { clearOffline } from '../offline'
+import { clearOffline, offlineSupported } from '../offline'
 import { useApp } from '../state/AppContext'
 
 const EMPTY_COLUMNIST = {
@@ -484,6 +484,15 @@ export function Settings() {
         <p className="faint" style={{ marginTop: 0 }}>
           Los artículos y audios que descargues se guardan en el teléfono.
         </p>
+        {!offlineSupported() && (
+          <p className="hint" style={{ color: 'var(--warn)' }}>
+            Ahora mismo está desactivado porque la app no se abrió por HTTPS ni
+            en localhost. Por la IP de tu red local el navegador no permite
+            guardar nada para uso sin conexión, ni instalar la app en la
+            pantalla de inicio, ni poner los controles en la pantalla de
+            bloqueo. Todo lo demás (leer y escuchar con conexión) sí funciona.
+          </p>
+        )}
         <button
           className="btn small"
           onClick={async () => { await clearOffline(); notify('Descargas borradas') }}

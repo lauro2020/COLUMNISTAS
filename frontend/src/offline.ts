@@ -10,6 +10,26 @@
 
 import { api, withToken } from './api/client'
 
+/** ¿Puede este navegador guardar cosas para usarlas sin conexión?
+ *
+ * El service worker solo existe en un «contexto seguro»: HTTPS, o localhost.
+ * Si abres la app desde el teléfono por la IP de tu computadora
+ * (http://192.168.x.x:8080) el navegador lo desactiva, y con él se van la
+ * descarga para uso sin conexión, la instalación en la pantalla de inicio y
+ * los controles en la pantalla de bloqueo.
+ */
+export function offlineSupported(): boolean {
+  return (
+    typeof navigator !== 'undefined' &&
+    'serviceWorker' in navigator &&
+    window.isSecureContext
+  )
+}
+
+export const OFFLINE_UNSUPPORTED_REASON =
+  'Para descargar y escuchar sin conexión, la app tiene que abrirse por HTTPS ' +
+  '(o en localhost). Por IP de red local el navegador lo desactiva.'
+
 export function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return
   window.addEventListener('load', () => {
@@ -20,6 +40,8 @@ export function registerServiceWorker() {
 }
 
 export async function cacheDayOffline(date?: string): Promise<{ count: number }> {
+  if (!offlineSupported()) throw new Error(OFFLINE_UNSUPPORTED_REASON)
+
   const bundle = await api.offlineBundle(date)
 
   const articleUrls = bundle.resources.filter((url) => url.startsWith('/api/articles/'))
