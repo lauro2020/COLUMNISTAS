@@ -367,12 +367,20 @@ la casilla **«Identificarse como navegador»** en su ficha:
 Hace falta en dos casos: sitios que pintan el texto con JavaScript y sitios
 que devuelven 403 aun con la casilla de navegador activada.
 
-En el archivo `.env`, pon las **dos** variables en `true`:
+En el archivo `.env`, pon las **dos** variables en `true`. Son dos cosas
+distintas: la primera instala Chromium al construir la imagen, la segunda
+permite usarlo.
 
 ```ini
 INSTALL_PLAYWRIGHT=true
 ENABLE_HEADLESS_BROWSER=true
 ```
+
+> ⚠️ Cada una en **su propio renglón y sin `#` delante**. Si el nombre solo
+> aparece dentro de un comentario (una línea que empieza por `#`), no cuenta:
+> Docker ignora todo lo que va después de la almohadilla. Para salir de dudas,
+> `python -m app.cli doctor` te dice en su punto 4 si Chromium está instalado
+> de verdad.
 
 Y reconstruye:
 

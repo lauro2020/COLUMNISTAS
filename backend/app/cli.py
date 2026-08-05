@@ -238,6 +238,31 @@ def cmd_doctor(_: argparse.Namespace) -> int:
                 estado = f"FALLA  {result.error}"
             print(f"   {name:<32} {estado}")
 
+    print("\n4) Navegador headless (para los medios que rechazan al robot)")
+    from app.collector.http_client import playwright_available
+
+    activado = settings.enable_headless_browser
+    instalado = playwright_available()
+    print(f"   ENABLE_HEADLESS_BROWSER (en el .env)  {'sí' if activado else 'no'}")
+    print(f"   Chromium instalado en la imagen       {'sí' if instalado else 'no'}")
+    if activado and not instalado:
+        print()
+        print("   ⚠ Está pedido pero no instalado. Falta añadir al archivo .env")
+        print("     esta línea, SIN almohadilla delante y en su propio renglón:")
+        print()
+        print("         INSTALL_PLAYWRIGHT=true")
+        print()
+        print("     (si solo aparece dentro de un comentario que empieza por «#»,")
+        print("      no cuenta: Docker ignora todo lo que va después de la #)")
+        print("     Después: docker compose up -d --build")
+    elif not activado and not instalado:
+        print("   → Ninguna fuente usará navegador. Está bien si ninguna lo pide.")
+    elif instalado and not activado:
+        print("   → Instalado pero apagado. Pon ENABLE_HEADLESS_BROWSER=true"
+              " en el .env para usarlo.")
+    else:
+        print("   → Listo: las fuentes que lo necesiten lo usarán como respaldo.")
+
     print("\n" + "-" * 72)
     print("Cómo leer esto:")
     print("  · Si el punto 1 falla       -> el contenedor no tiene red.")
