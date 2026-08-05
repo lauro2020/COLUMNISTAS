@@ -223,15 +223,24 @@ caminos, de menos a más completo:
 
 #### A. Por la red de tu casa (2 minutos, funciona hoy)
 
-Averigua la dirección de tu Mac en la red:
+Desde la carpeta del proyecto:
 
 ```bash
-ipconfig getifaddr en0        # WiFi
-ipconfig getifaddr en1        # si estás por cable
+sh tools/direccion-en-red.sh
 ```
 
-Te devuelve algo como `192.168.1.42`. En el teléfono, **conectado al mismo
-WiFi**, abre `http://192.168.1.42:8080`.
+Te dice la dirección exacta y comprueba que la app responda ahí:
+
+```
+  Abre esta dirección en el teléfono, conectado al MISMO WiFi:
+
+      http://192.168.1.42:8080
+
+  ✓ La app responde en esa dirección.
+```
+
+En el teléfono, **conectado al mismo WiFi**, abre esa dirección y entra con tu
+contraseña.
 
 Con esto puedes **leer y escuchar** con normalidad. Lo que NO vas a tener:
 
