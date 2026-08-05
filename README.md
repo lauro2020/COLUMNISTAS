@@ -598,6 +598,7 @@ docker compose exec api python -m app.cli check-sources
 
 | Síntoma | Qué mirar |
 |---|---|
+| Al construir: `Package 'ttf-ubuntu-font-family' has no installation candidate` | Playwright intentaba instalar paquetes de Ubuntu sobre Debian. Ya está corregido: la imagen base está fijada a Debian 12 y las bibliotecas se instalan por nombre. Si lo ves, haz `git pull` y vuelve a construir. |
 | `HTTP 403 — el medio rechaza a nuestro robot` | Ese sitio responde 403 a cualquier cliente que no sea un navegador, incluso para servir su `robots.txt`. En **Ajustes › Columnistas › Editar**, activa **«Identificarse como navegador»** para esa fuente. |
 | `403 … aun identificándonos como navegador` | El sitio (Milenio, por ejemplo) filtra por algo más que el User-Agent. Activa el navegador headless: ver más abajo. |
 | Reforma dice `redirigió a su pantalla de acceso` | No reconoció tu sesión. Guarda las cookies en **Ajustes › Credenciales** con el medio escrito exactamente `Reforma`. Si ya estaban, caducaron: vuelve a copiarlas. |
