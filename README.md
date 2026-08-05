@@ -672,6 +672,7 @@ docker compose exec api python -m app.cli check-sources
 
 | Síntoma | Qué mirar |
 |---|---|
+| Cambiaste `APP_PASSWORD` y sigue sin dejarte entrar | `docker compose restart` **no** vuelve a leer el `.env`. Hace falta `docker compose up -d`, que recrea los contenedores con los valores nuevos. |
 | No te deja entrar con tu contraseña | `docker compose exec api python -m app.cli check-password`: te dice si la que tecleas coincide con la que tiene el contenedor, sin mostrarla. Ojo con `#` y `$` en el `.env`: el primero convierte en comentario todo lo que le sigue, y el segundo lo interpreta Docker como una variable. |
 | Al construir: `Package 'ttf-ubuntu-font-family' has no installation candidate` | Playwright intentaba instalar paquetes de Ubuntu sobre Debian. Ya está corregido: la imagen base está fijada a Debian 12 y las bibliotecas se instalan por nombre. Si lo ves, haz `git pull` y vuelve a construir. |
 | `HTTP 403 — el medio rechaza a nuestro robot` | Ese sitio responde 403 a cualquier cliente que no sea un navegador, incluso para servir su `robots.txt`. En **Ajustes › Columnistas › Editar**, activa **«Identificarse como navegador»** para esa fuente. |
