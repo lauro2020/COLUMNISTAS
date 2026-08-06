@@ -5,7 +5,7 @@ import { PlayerBar } from './PlayerBar'
 import { Toast } from './ui'
 
 const TABS = [
-  { to: '/', glyph: '📥', label: 'Hoy', end: true },
+  { to: '/', glyph: '📥', label: 'Columnistas', end: true },
   { to: '/buscar', glyph: '🔍', label: 'Buscar', end: false },
   { to: '/diagnostico', glyph: '📊', label: 'Fuentes', end: false },
   { to: '/configuracion', glyph: '⚙️', label: 'Ajustes', end: false },

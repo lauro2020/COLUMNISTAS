@@ -2,7 +2,7 @@
 
 import type {
   ArticleDetail, ArticleListItem, CollectionRun, Columnist, Credential,
-  Inbox, Preferences, SearchResult, SourceHealth, Stats, TtsProvider,
+  Inbox, Overview, Preferences, SearchResult, SourceHealth, Stats, TtsProvider,
 } from './types'
 
 const TOKEN_KEY = 'columnistas.token'
@@ -71,6 +71,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ password }),
     }),
+
+  // -- pantalla de inicio: los columnistas de un vistazo ----------------------
+  overview: (recentDays = 15) =>
+    request<Overview>(`/api/columnists/overview?recent_days=${recentDays}`),
+
+  /** Todo lo recopilado de un columnista, del más reciente al más antiguo. */
+  columnistArticles: (columnistId: number, size = 100) =>
+    request<SearchResult>(
+      `/api/articles?columnist_id=${columnistId}&size=${size}`),
 
   // -- bandeja y artículos ---------------------------------------------------
   inbox: (date?: string) =>

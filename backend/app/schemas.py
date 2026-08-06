@@ -137,6 +137,35 @@ class InboxGroup(BaseModel):
     articles: list[ArticleListItem]
 
 
+class ColumnistOverview(BaseModel):
+    """Una fila de la pantalla de inicio: un columnista de un vistazo."""
+
+    columnist_id: int
+    name: str
+    outlet: str
+    active: bool
+    #: el último artículo, SOLO si se publicó dentro de la ventana reciente
+    latest: ArticleListItem | None = None
+    #: fecha del último artículo aunque sea viejo, para poder decir «hace tanto»
+    last_published_at: dt.datetime | None = None
+    days_since_last: int | None = None
+    published_today: bool = False
+    total_articles: int = 0
+    #: la fuente lleva fallos seguidos: se marca discretamente en la fila
+    consecutive_failures: int = 0
+    last_error: str | None = None
+
+
+class OverviewResponse(BaseModel):
+    date: dt.date
+    recent_days: int
+    total_columnists: int
+    with_recent: int
+    published_today: int
+    last_run_at: dt.datetime | None = None
+    columnists: list[ColumnistOverview] = []
+
+
 class InboxResponse(BaseModel):
     date: dt.date
     total: int

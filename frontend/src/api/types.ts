@@ -91,6 +91,32 @@ export interface Inbox {
   last_run_at: string | null
 }
 
+export interface ColumnistOverview {
+  columnist_id: number
+  name: string
+  outlet: string
+  active: boolean
+  /** El último artículo, solo si entra en la ventana reciente (15 días). */
+  latest: ArticleListItem | null
+  /** Fecha del último aunque sea viejo, para decir «hace tanto». */
+  last_published_at: string | null
+  days_since_last: number | null
+  published_today: boolean
+  total_articles: number
+  consecutive_failures: number
+  last_error: string | null
+}
+
+export interface Overview {
+  date: string
+  recent_days: number
+  total_columnists: number
+  with_recent: number
+  published_today: number
+  last_run_at: string | null
+  columnists: ColumnistOverview[]
+}
+
 export interface Preferences {
   collect_hour: number
   collect_minute: number

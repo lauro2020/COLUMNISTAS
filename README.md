@@ -42,9 +42,16 @@ según el momento.
   regenerarlo cuando quieras.
 - **Sincronía texto ↔ audio**: mientras escuchas, el párrafo correspondiente se
   resalta; si tocas un párrafo, el audio salta ahí.
-- **Bandeja del día** agrupada por columnista, con estados (sin leer, leído,
-  escuchado, archivado, favorito), búsqueda de texto completo en español y
-  filtros por columnista, medio, fecha y estado.
+- **Pantalla de inicio por columnista**: una fila por cada uno, con el título y
+  la fecha de su última columna. Solo aparece si se publicó en los últimos 15
+  días; si es más antigua, en su lugar va la leyenda «Sin artículos recientes»
+  con cuánto hace del último. Quien publicó hoy va arriba y marcado, de modo
+  que se ve de un vistazo quién tiene algo nuevo y quién no.
+- **Históricos plegados**: cada fila lleva una pestaña que despliega todo lo
+  recopilado de ese columnista, del más reciente al más antiguo.
+- **Estados** por artículo (sin leer, leído, escuchado, archivado, favorito),
+  búsqueda de texto completo en español y filtros por columnista, medio, fecha
+  y estado.
 - **Reproductor** con velocidad de 0.75× a 2×, saltos de ±15 s, cola continua y
   reanudación desde donde te quedaste, sincronizada entre dispositivos.
 - **PWA instalable**: funciona sin conexión y reproduce en segundo plano con
@@ -195,7 +202,7 @@ Al arrancar, la app ya trae cargados **21 columnistas** de nueve medios
 Código Magenta y Proceso). Dos llegan **desactivados** porque les falta la URL
 de su página de autor; se ven en Ajustes con una nota explicando qué completar.
 
-No esperes a mañana: en la pantalla **Hoy** pulsa **↻ Buscar ahora**. Con
+No esperes a mañana: en la pantalla **Columnistas** pulsa **↻ Buscar ahora**. Con
 tantas fuentes la primera recolección tarda unos **10 minutos** (hay una espera
 de cortesía entre peticiones al mismo medio) y los audios otro tanto.
 
@@ -299,7 +306,7 @@ que la recolección de las 06:00 ocurra siempre, esté tu Mac encendida o no.
 
 Una vez instalada:
 
-- Pulsa **⤓ Descargar para sin conexión** en la bandeja del día. A partir de ahí
+- Pulsa **⤓ Descargar para sin conexión** en la pantalla de inicio. A partir de ahí
   puedes leer y escuchar sin datos.
 - El audio sigue sonando con la pantalla apagada, y aparecen los controles en la
   pantalla de bloqueo.
@@ -680,6 +687,7 @@ docker compose exec api python -m app.cli check-sources
 | Reforma dice `redirigió a su pantalla de acceso` | No reconoció tu sesión. Guarda las cookies en **Ajustes › Credenciales** con el medio escrito exactamente `Reforma`. Si ya estaban, caducaron: vuelve a copiarlas. |
 | `No address associated with hostname` | Es DNS, no scraping: el contenedor no logra traducir el dominio a una dirección. Corre `doctor`. La configuración ya fuerza DNS de Cloudflare y Google, porque el resolutor interno de Docker Desktop falla con algunos periódicos. Si sigue, prueba `docker compose restart` y reinicia Docker Desktop. |
 | No aparece ninguna columna | Pestaña **Fuentes**: ahí se ve el error exacto de cada medio. |
+| Un columnista dice «Sin artículos recientes» | Su última columna recopilada tiene más de 15 días. La leyenda dice cuánto hace; su histórico completo sigue disponible en la pestaña **históricos** de su fila. |
 | Una fuente en rojo | El medio cambió su web. Prueba `test-source <id>`; si el genérico tampoco saca nada, hará falta ajustar el extractor. |
 | Textos truncados o "de pago" | Faltan las cookies de tu suscripción, o caducaron. Ver [Medios de pago](#medios-de-pago). |
 | El audio dice "falló" | Casi siempre es la clave de OpenAI (ausente, sin saldo o con el límite alcanzado). El error completo se ve al abrir el artículo. |

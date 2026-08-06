@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import datetime as dt
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.api.common import article_item as _to_item
+from app.api.common import day_bounds as _day_bounds
+from app.api.common import local_tz as _tz
 from app.api.deps import current_user, get_db
-from app.config import settings
-from app.models import Article, AudioStatus, CollectionRun, UserPreference
+from app.models import Article, AudioStatus, CollectionRun
 from app.schemas import (
     ArticleDetail,
     ArticleListItem,
@@ -23,30 +24,6 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/api/articles", tags=["artículos"])
-
-
-# ---------------------------------------------------------------------------
-def _tz(db: Session) -> ZoneInfo:
-    prefs = db.get(UserPreference, 1)
-    try:
-        return ZoneInfo((prefs.timezone if prefs else None) or settings.timezone)
-    except Exception:  # noqa: BLE001
-        return ZoneInfo("UTC")
-
-
-def _to_item(article: Article) -> ArticleListItem:
-    item = ArticleListItem.model_validate(article)
-    audio = article.audios[0] if article.audios else None
-    if audio:
-        item.audio_id = audio.id
-        item.audio_status = audio.status
-        item.audio_duration = audio.duration_seconds
-    return item
-
-
-def _day_bounds(day: dt.date, tz: ZoneInfo) -> tuple[dt.datetime, dt.datetime]:
-    start = dt.datetime.combine(day, dt.time.min, tzinfo=tz)
-    return start, start + dt.timedelta(days=1)
 
 
 # ---------------------------------------------------------------------------

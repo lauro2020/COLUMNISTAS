@@ -2,17 +2,28 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import datetime as dt
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
+from app.api.common import article_item as _article_item
+from app.api.common import local_tz as _tz
+from app.api.common import overview_sort_key, recent_cutoff
 from app.api.deps import current_user, get_db
 from app.collector import normalize, rss
 from app.collector.extractors.registry import extractor_keys, get_extractor
 from app.collector.http_client import Fetcher
-from app.models import Article, Columnist
-from app.schemas import ColumnistCreate, ColumnistOut, ColumnistUpdate
+from app.models import Article, CollectionRun, Columnist
+from app.schemas import (
+    ColumnistCreate,
+    ColumnistOut,
+    ColumnistOverview,
+    ColumnistUpdate,
+    OverviewResponse,
+)
 
 router = APIRouter(prefix="/api/columnists", tags=["columnistas"])
 
@@ -108,6 +119,85 @@ def delete_columnist(
 @router.get("/extractors", response_model=list[str])
 def list_extractors(_: str = Depends(current_user)) -> list[str]:
     return extractor_keys()
+
+
+@router.get("/overview", response_model=OverviewResponse)
+def overview(
+    recent_days: int = Query(default=15, ge=1, le=365),
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+    _: str = Depends(current_user),
+) -> OverviewResponse:
+    """Todos los columnistas de un vistazo, con su último artículo.
+
+    Es la pantalla de inicio: una fila por columnista, para ver en un golpe de
+    vista quién publicó hoy, quién publicó hace poco y quién lleva tiempo sin
+    aparecer. El último artículo solo se devuelve si entra en la ventana
+    reciente; si es más viejo, se manda la fecha para poder decir cuánto hace.
+    """
+    tz = _tz(db)
+    hoy = dt.datetime.now(tz).date()
+    corte = recent_cutoff(hoy, recent_days, tz)
+
+    query = select(Columnist).order_by(Columnist.name)
+    if not include_inactive:
+        query = query.where(Columnist.active.is_(True))
+    columnists = list(db.scalars(query).all())
+
+    # Un solo viaje a la base de datos para el último artículo de cada uno
+    ultimos = {
+        article.columnist_id: article
+        for article in db.scalars(
+            select(Article)
+            .options(selectinload(Article.audios))
+            .where(Article.is_archived.is_(False))
+            .order_by(Article.columnist_id, Article.published_at.desc().nullslast())
+            .distinct(Article.columnist_id)
+        ).all()
+    }
+    totales = dict(
+        db.execute(
+            select(Article.columnist_id, func.count(Article.id))
+            .where(Article.is_archived.is_(False))
+            .group_by(Article.columnist_id)
+        ).all()
+    )
+
+    filas: list[ColumnistOverview] = []
+    for columnist in columnists:
+        ultimo = ultimos.get(columnist.id)
+        fila = ColumnistOverview(
+            columnist_id=columnist.id,
+            name=columnist.name,
+            outlet=columnist.outlet,
+            active=columnist.active,
+            total_articles=totales.get(columnist.id, 0),
+            consecutive_failures=columnist.consecutive_failures,
+            last_error=columnist.last_error,
+        )
+
+        if ultimo is not None and ultimo.published_at is not None:
+            publicado = ultimo.published_at.astimezone(tz)
+            fila.last_published_at = ultimo.published_at
+            fila.days_since_last = (hoy - publicado.date()).days
+            fila.published_today = publicado.date() == hoy
+            if ultimo.published_at >= corte:
+                fila.latest = _article_item(ultimo)
+
+        filas.append(fila)
+
+    filas.sort(key=lambda f: overview_sort_key(
+        f.published_today, f.days_since_last, f.name))
+
+    return OverviewResponse(
+        date=hoy,
+        recent_days=recent_days,
+        total_columnists=len(filas),
+        with_recent=sum(1 for f in filas if f.latest is not None),
+        published_today=sum(1 for f in filas if f.published_today),
+        last_run_at=db.scalar(select(func.max(CollectionRun.finished_at))),
+        columnists=filas,
+    )
 
 
 @router.post("/{columnist_id}/test")
