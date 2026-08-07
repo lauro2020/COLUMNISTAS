@@ -98,10 +98,19 @@ def test_parse_feed():
 
 
 def test_descubrir_feed_en_el_head():
+    """Se acepta el feed que cuelga de la página del autor."""
     encontrado = rss.discover_feed_url(
-        fixtures.PAGE_WITH_FEED_LINK, "https://diariox.test/autores/x/"
+        fixtures.PAGE_WITH_FEED_LINK, "https://diariox.test/opinion/"
     )
     assert encontrado == "https://diariox.test/opinion/feed"
+
+
+def test_un_feed_de_otra_seccion_no_se_toma_por_el_del_autor():
+    """`/opinion/feed` en la página de un autor es el de toda la sección."""
+    encontrado = rss.discover_feed_url(
+        fixtures.PAGE_WITH_FEED_LINK, "https://diariox.test/autores/fulanito/"
+    )
+    assert encontrado is None
 
 
 @respx.mock
@@ -367,3 +376,51 @@ def test_una_contrasena_incorrecta_dice_que_es_incorrecta(monkeypatch):
     assert respuesta.status_code == 401
     assert respuesta.json()["detail"] == "Contraseña incorrecta"
     routes_auth._failures.clear()
+
+
+# ---------------------------------------------------------------------------
+# El feed del columnista, no el de todo el periódico
+# ---------------------------------------------------------------------------
+CABECERA_WORDPRESS = """
+<html><head>
+  <link rel="alternate" type="application/rss+xml" title="Sonora Presente &raquo; Feed"
+        href="https://sonorapresente.com/feed/">
+  <link rel="alternate" type="application/rss+xml" title="Feed de María Amparo Casar"
+        href="https://sonorapresente.com/columnista/mariaamparocasar/feed/">
+</head><body></body></html>
+"""
+
+
+def test_se_elige_el_feed_del_columnista_y_no_el_del_sitio():
+    """WordPress anuncia primero el del sitio entero: quedarse con ese
+    llenaría la bandeja de columnas de otras personas."""
+    encontrado = rss.discover_feed_url(
+        CABECERA_WORDPRESS, "https://sonorapresente.com/columnista/mariaamparocasar/"
+    )
+    assert encontrado == "https://sonorapresente.com/columnista/mariaamparocasar/feed"
+
+
+def test_si_solo_hay_feed_de_todo_el_sitio_no_se_usa_ninguno():
+    solo_el_del_sitio = """
+    <html><head><link rel="alternate" type="application/rss+xml"
+        href="https://sonorapresente.com/feed/"></head><body></body></html>
+    """
+    assert rss.discover_feed_url(
+        solo_el_del_sitio, "https://sonorapresente.com/columnista/mariaamparocasar/"
+    ) is None
+
+
+def test_para_la_portada_de_un_sitio_cualquier_feed_vale():
+    assert rss.discover_feed_url(
+        CABECERA_WORDPRESS, "https://sonorapresente.com/"
+    ) == "https://sonorapresente.com/feed"
+
+
+@pytest.mark.parametrize("feed,autor,es_suyo", [
+    ("https://s.mx/columnista/casar/feed/", "https://s.mx/columnista/casar/", True),
+    ("https://s.mx/feed/author/javier-solorzano", "https://s.mx/autores/javier-solorzano/", True),
+    ("https://s.mx/feed/", "https://s.mx/columnista/casar/", False),
+    ("https://s.mx/rss.xml", "https://s.mx/seccion/que-alguien-me-explique/", False),
+])
+def test_se_distingue_el_feed_propio_del_general(feed, autor, es_suyo):
+    assert rss.feed_belongs_to_author(feed, autor) is es_suyo

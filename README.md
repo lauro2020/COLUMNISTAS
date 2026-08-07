@@ -197,10 +197,18 @@ docker compose down -v            # apagar Y BORRAR todos los datos
 
 ## Primer uso
 
-Al arrancar, la app ya trae cargados **21 columnistas** de nueve medios
-(El Financiero, El Universal, Reforma, Milenio, Excélsior, La Razón, UnoTV,
-Código Magenta y Proceso). Dos llegan **desactivados** porque les falta la URL
-de su página de autor; se ven en Ajustes con una nota explicando qué completar.
+Al arrancar, la app ya trae cargados **21 columnistas** de diez medios
+(El Financiero, El Universal, Reforma, Milenio, Excélsior, La Razón, Sonora
+Presente, Código Magenta, Proceso y Nexos). Dos llegan **desactivados** porque
+les falta la URL de su página de autor; se ven en Ajustes con una nota
+explicando qué completar.
+
+Si un columnista se cambia de periódico o su medio le mueve la página de
+sitio, no hay que editar nada a mano: la semilla lleva una lista de traslados
+y otra de direcciones corregidas, y las aplica al arrancar. Un traslado
+**conserva la ficha y con ella todo su histórico**; una corrección de
+dirección solo se aplica si la ficha sigue teniendo exactamente la que se sabe
+rota, así que nunca pisa un cambio que hayas hecho tú.
 
 No esperes a mañana: en la pantalla **Columnistas** pulsa **↻ Buscar ahora**. Con
 tantas fuentes la primera recolección tarda unos **10 minutos** (hay una espera

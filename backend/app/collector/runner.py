@@ -248,7 +248,18 @@ def _discover(
     wants_rss = columnist.source_type in (SourceType.rss, SourceType.auto)
 
     if wants_rss and columnist.feed_url:
-        return rss.parse_feed(columnist.feed_url, fetcher)
+        # Un feed guardado en su día puede ser el del sitio entero. Se comprueba
+        # cada vez, porque si no lo es traería columnas de otras personas y
+        # nadie volvería a mirarlo: el feed se reutiliza cada mañana tal cual.
+        if rss.feed_belongs_to_author(columnist.feed_url, columnist.source_url):
+            return rss.parse_feed(columnist.feed_url, fetcher)
+        log.info(
+            "El feed guardado de %s (%s) es de todo el medio, no suyo; se "
+            "descarta y se vuelve a la página del autor",
+            columnist.name, columnist.feed_url,
+        )
+        columnist.feed_url = None
+        db.flush()
 
     if wants_rss:
         # Intenta descubrir un feed una sola vez y lo guarda para el futuro

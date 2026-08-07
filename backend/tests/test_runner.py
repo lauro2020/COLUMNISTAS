@@ -439,3 +439,41 @@ def test_si_ya_lo_diste_de_alta_en_el_medio_nuevo_no_se_toca_nada(db):
     assert db.scalar(
         select(func.count(Columnist.id)).where(Columnist.name == "Jorge G. Castañeda")
     ) == 2
+
+
+def test_se_corrige_una_direccion_que_el_medio_movio(db):
+    from app import seed as semilla
+    from app.models import Columnist
+
+    db.add(Columnist(
+        name="Javier Solórzano", outlet="La Razón",
+        source_url="https://www.razon.com.mx/autor/javier-solorzano-zinser/",
+        consecutive_failures=5, last_error="redirige a la portada",
+        feed_url="https://www.razon.com.mx/feed/",
+    ))
+    db.flush()
+
+    assert semilla.apply_url_fixes(db) == 1
+
+    ficha = db.scalar(select(Columnist).where(Columnist.name == "Javier Solórzano"))
+    assert "/autores/" in ficha.source_url
+    assert ficha.consecutive_failures == 0
+    assert ficha.feed_url is None, "el feed del sitio entero no debe sobrevivir"
+
+    assert semilla.apply_url_fixes(db) == 0, "no debe repetirse"
+
+
+def test_una_direccion_puesta_a_mano_no_se_pisa(db):
+    """Si el usuario la corrigió él, manda la suya."""
+    from app import seed as semilla
+    from app.models import Columnist
+
+    db.add(Columnist(
+        name="Javier Solórzano", outlet="La Razón",
+        source_url="https://www.razon.com.mx/algo-que-puse-yo/",
+    ))
+    db.flush()
+
+    assert semilla.apply_url_fixes(db) == 0
+    ficha = db.scalar(select(Columnist).where(Columnist.name == "Javier Solórzano"))
+    assert ficha.source_url == "https://www.razon.com.mx/algo-que-puse-yo/"

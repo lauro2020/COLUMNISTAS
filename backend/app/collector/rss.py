@@ -7,6 +7,7 @@ mucho más respetuoso con el medio que descargar la página del autor.
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlparse
 
 import feedparser
 from bs4 import BeautifulSoup
@@ -20,17 +21,51 @@ log = logging.getLogger(__name__)
 FEED_TYPES = ("application/rss+xml", "application/atom+xml", "application/feed+json")
 
 
+def feed_belongs_to_author(feed_url: str, source_url: str) -> bool:
+    """¿Ese feed es el del columnista, o el de todo el periódico?
+
+    Importa más de lo que parece. WordPress anuncia DOS feeds en la página de
+    un columnista —el del sitio entero primero, el suyo después—, así que
+    quedarse con el primero llena la bandeja de columnas de otras personas.
+    Y una vez guardado, el feed se reutiliza cada mañana sin volver a mirar.
+
+    Se acepta si cuelga de la ruta del autor (`/columnista/fulano/feed/`) o si
+    lleva su identificador dentro (`/feed/author/fulano`). Si la fuente es el
+    sitio entero, no hay nada que distinguir y vale cualquiera.
+    """
+    ruta_autor = urlparse(source_url).path.rstrip("/").lower()
+    if not ruta_autor:
+        return True
+
+    ruta_feed = urlparse(feed_url).path.lower()
+    if ruta_feed.startswith(f"{ruta_autor}/"):
+        return True
+
+    slug = ruta_autor.rsplit("/", 1)[-1]
+    return len(slug) >= 5 and slug in ruta_feed
+
+
 def discover_feed_url(html: str, base_url: str) -> str | None:
-    """Busca <link rel="alternate" type="application/rss+xml"> en el <head>."""
+    """Busca <link rel="alternate" type="application/rss+xml"> en el <head>.
+
+    De los que anuncie la página se elige el del columnista, nunca el del
+    sitio entero: ver `feed_belongs_to_author`.
+    """
     soup = BeautifulSoup(html, "lxml")
-    for link in soup.select('link[rel="alternate"][href]'):
-        if (link.get("type") or "").lower() in FEED_TYPES:
-            return normalize.canonicalize_url(link["href"], base_url)
-    # Rutas habituales cuando el medio no lo anuncia
-    for guess in ("/feed", "/rss", "/feed/", "/rss.xml", "/index.xml"):
-        candidate = normalize.canonicalize_url(guess, base_url)
-        if candidate != normalize.canonicalize_url(base_url):
-            return None  # se prueba explícitamente en `try_common_feeds`
+    candidatos = [
+        normalize.canonicalize_url(link["href"], base_url)
+        for link in soup.select('link[rel="alternate"][href]')
+        if (link.get("type") or "").lower() in FEED_TYPES
+    ]
+    for candidato in candidatos:
+        if feed_belongs_to_author(candidato, base_url):
+            return candidato
+    if candidatos:
+        log.info(
+            "En %s solo se anuncian feeds de todo el sitio (%s); se ignoran para "
+            "no recolectar columnas de otras personas",
+            base_url, ", ".join(candidatos[:3]),
+        )
     return None
 
 

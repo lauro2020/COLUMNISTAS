@@ -138,18 +138,17 @@ SEED_COLUMNISTS: list[dict] = [
 
     # --- Otros medios ------------------------------------------------------
     _c("Javier Solórzano", "La Razón",
-       "https://www.razon.com.mx/autor/javier-solorzano-zinser/",
+       "https://www.razon.com.mx/autores/javier-solorzano-zinser/",
        "lunes a viernes",
-       notes=(
-           "De memoria. OJO: esta URL redirige a la portada de La Razón, así que "
-           "la página de autor cambió de dirección. Abre cualquier columna suya "
-           "y pulsa sobre su NOMBRE: ahí está la dirección buena. No pongas aquí "
-           "la de una columna concreta; la app la rechaza a propósito."
-       )),
-    _c("María Amparo Casar", "UnoTV",
-       "https://www.unotv.com/opinion/maria-amparo-casar/",
+       notes="De memoria. La Razón usa «/autores/» en plural."),
+    _c("María Amparo Casar", "Sonora Presente",
+       "https://sonorapresente.com/columnista/mariaamparocasar/",
        "sin verificar",
-       notes="Dejó Excélsior tras 11 años. Colabora en UnoTV y medios de radio."),
+       notes=(
+           "Dejó Excélsior tras 11 años. La página de UnoTV no publicaba una "
+           "lista de columnas que se pudiera leer; Sonora Presente sí sindica "
+           "sus columnas y sí la publica."
+       )),
     _c("Ramón Alberto Garza", "Código Magenta",
        "https://www.codigomagenta.com.mx/seccion/que-alguien-me-explique/",
        "varias veces por semana", notes="¡Que alguien me explique!"),
@@ -188,6 +187,17 @@ TRASLADOS = [
         "source_url": "https://www.eluniversal.com.mx/opinion/jorge-castaneda/",
         "extractor_key": "eluniversal",
         "notes": "Dejó El Financiero: ahora publica en El Universal.",
+    },
+    {
+        "name": "María Amparo Casar",
+        "desde": "UnoTV",
+        "hasta": "Sonora Presente",
+        "source_url": "https://sonorapresente.com/columnista/mariaamparocasar/",
+        "extractor_key": None,
+        "notes": (
+            "La página de UnoTV no publicaba una lista de columnas que se "
+            "pudiera leer; Sonora Presente sindica sus columnas y sí la publica."
+        ),
     },
 ]
 
@@ -232,6 +242,48 @@ def apply_moves(db: Session) -> int:
     return movidos
 
 
+#: Direcciones que el medio cambió de sitio, dentro del mismo periódico.
+#:
+#: La semilla solo añade lo que falta, así que a un columnista ya dado de alta
+#: nunca le tocaría la dirección. Aquí se corrige, pero SOLO si sigue teniendo
+#: exactamente la que se sabe rota: si la cambiaste tú, se respeta.
+CORRECCIONES_DE_URL = [
+    {
+        "name": "Javier Solórzano",
+        "outlet": "La Razón",
+        "vieja": "https://www.razon.com.mx/autor/javier-solorzano-zinser/",
+        "nueva": "https://www.razon.com.mx/autores/javier-solorzano-zinser/",
+        "notes": "De memoria. La Razón usa «/autores/» en plural.",
+    },
+]
+
+
+def apply_url_fixes(db: Session) -> int:
+    from app.collector import normalize
+
+    corregidas = 0
+    for arreglo in CORRECCIONES_DE_URL:
+        ficha = db.scalar(
+            select(Columnist)
+            .where(Columnist.name == arreglo["name"])
+            .where(Columnist.outlet == arreglo["outlet"])
+        )
+        if ficha is None:
+            continue
+        actual = normalize.canonicalize_url(ficha.source_url or "")
+        if actual != normalize.canonicalize_url(arreglo["vieja"]):
+            continue  # ya está corregida, o la cambió el usuario
+
+        ficha.source_url = normalize.canonicalize_url(arreglo["nueva"])
+        ficha.notes = arreglo["notes"]
+        ficha.feed_url = None
+        ficha.consecutive_failures = 0
+        ficha.last_error = None
+        corregidas += 1
+        log.info("Dirección corregida de %s: %s", arreglo["name"], arreglo["nueva"])
+    return corregidas
+
+
 def seed_columnists(db: Session) -> int:
     created = 0
     for entry in SEED_COLUMNISTS:
@@ -272,13 +324,17 @@ def run(db: Session) -> dict:
     # Los traslados van primero: así, cuando la semilla busque al columnista
     # en su medio nuevo, ya lo encuentra y no crea un duplicado.
     moved = apply_moves(db)
+    fixed = apply_url_fixes(db)
     created = seed_columnists(db)
     prefs = seed_preferences(db)
     db.commit()
-    log.info("Semilla aplicada: %s columnistas nuevos, %s trasladados, preferencias=%s",
-             created, moved, prefs)
+    log.info(
+        "Semilla aplicada: %s nuevos, %s trasladados, %s direcciones corregidas, "
+        "preferencias=%s", created, moved, fixed, prefs,
+    )
     return {
         "columnists_created": created,
         "columnists_moved": moved,
+        "urls_fixed": fixed,
         "preferences_created": prefs,
     }
