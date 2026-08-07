@@ -639,30 +639,39 @@ input[type='range']:focus { outline: none; }
   display: flex;
   align-items: center;
   gap: .4rem;
-  flex-wrap: nowrap;
+  /* En pantalla estrecha (teléfono) la línea se parte en vez de recortarse:
+     antes «el último, hace tres meses» se cortaba a la mitad. */
+  flex-wrap: wrap;
   margin-top: .22rem;
   font-size: .72rem;
   color: var(--text-faint);
   min-width: 0;
 }
 .col-meta .play-inline { width: 26px; height: 26px; font-size: .7rem; flex-shrink: 0; }
-.col-meta .col-historico-tab { margin-left: auto; flex-shrink: 0; }
 .col-fecha { font-weight: 560; color: var(--text-soft); }
+
+/* «históricos» y el botón de escuchar viajan juntos, pegados a la derecha */
+.col-acciones {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
 
 .col-sin-reciente {
   font-size: .78rem;
   color: var(--text-faint);
   font-style: italic;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .col-historico-tab {
   display: inline-flex;
   align-items: center;
   gap: .25rem;
-  padding: .2rem .1rem;
+  /* Holgado a propósito: se toca con el dedo en el teléfono */
+  padding: .35rem .25rem;
   border: none;
   background: none;
   cursor: pointer;

@@ -242,18 +242,39 @@ Desde la carpeta del proyecto:
 sh tools/direccion-en-red.sh
 ```
 
-Te dice la dirección exacta y comprueba que la app responda ahí:
+Ese comando revisa, una por una, las cinco cosas que tienen que estar bien, y
+al final te da la dirección:
 
 ```
-  Abre esta dirección en el teléfono, conectado al MISMO WiFi:
+── 2. Contenedores ──────────────────────────────
+  ✓ El contenedor «web» (la página) está corriendo.
+  ✓ El contenedor «api» (los datos) está corriendo.
+  ✓ El puerto está abierto a toda la red (0.0.0.0:8080).
+
+── 3. Escucha en el puerto 8080 ──────────────────
+  ✓ Sí, hay un programa escuchando en el 8080.
+
+── 4. Cortafuegos de macOS ───────────────────────
+  ✓ El cortafuegos está apagado: no está estorbando.
+
+── 5. Dirección para el teléfono ─────────────────
 
       http://192.168.1.42:8080
-
-  ✓ La app responde en esa dirección.
+  ✓ responde
 ```
 
-En el teléfono, **conectado al mismo WiFi**, abre esa dirección y entra con tu
-contraseña.
+Lo que salga con **✗** es lo que hay que arreglar, y el propio comando dice
+cómo. En el teléfono, **conectado al mismo WiFi**, escribe la dirección
+completa —con `http://` delante— y entra con tu contraseña.
+
+> Escribir `http://` no es un capricho: sin eso, el navegador del teléfono
+> toma la dirección como una búsqueda, o intenta `https://` y falla.
+
+Si el comando sale todo en ✓ y aun así el teléfono no abre, el problema está
+entre el router y el teléfono. Por orden: apaga los datos móviles, apaga
+cualquier VPN del teléfono, y comprueba que sea el mismo WiFi (muchos routers
+dan dos redes con nombres parecidos, una acabada en «5G», que a veces no se
+ven entre ellas; y la red «de invitados» casi nunca deja ver a las demás).
 
 Con esto puedes **leer y escuchar** con normalidad. Lo que NO vas a tener:
 
@@ -693,7 +714,7 @@ docker compose exec api python -m app.cli check-sources
 | El audio dice "falló" | Casi siempre es la clave de OpenAI (ausente, sin saldo o con el límite alcanzado). El error completo se ve al abrir el artículo. |
 | El audio no suena en el teléfono | Descarga el día primero si estás sin conexión; y comprueba que la app va por HTTPS. |
 | La app no se instala en el teléfono | Solo se puede instalar por HTTPS (o en `localhost`). Por IP de red local no. Ver [Instalar en el teléfono](#instalar-en-el-teléfono). |
-| El teléfono no abre la app | `localhost` es el propio teléfono. Usa la IP de la Mac (`ipconfig getifaddr en0`) o Tailscale. |
+| El teléfono no abre la app | `sh tools/direccion-en-red.sh`: revisa contenedores, puerto, cortafuegos y dirección, y dice qué falta. |
 | Todo va lento al recolectar | Es a propósito: hay una espera mínima entre peticiones al mismo medio. Se ajusta con `REQUEST_DELAY_SECONDS`. |
 
 Ver los registros:

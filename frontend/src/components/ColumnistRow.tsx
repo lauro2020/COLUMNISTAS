@@ -108,16 +108,17 @@ export function ColumnistRow({ fila, cola }: Props) {
             {ultimo.is_paywalled && <span className="pill warn">de pago</span>}
             {reproducible && <span className="mono">{formatTime(ultimo.audio_duration || 0)}</span>}
 
-            <Historicos fila={fila} abierto={abierto} alternar={alternarHistorico} />
-
-            <button
-              className="play-inline"
-              disabled={!reproducible}
-              title={reproducible ? 'Escuchar' : 'El audio todavía no está listo'}
-              onClick={() => ultimo && player.play(ultimo, cola)}
-            >
-              {sonando && player.playing ? '❚❚' : '▶'}
-            </button>
+            <span className="col-acciones">
+              <Historicos fila={fila} abierto={abierto} alternar={alternarHistorico} />
+              <button
+                className="play-inline"
+                disabled={!reproducible}
+                title={reproducible ? 'Escuchar' : 'El audio todavía no está listo'}
+                onClick={() => ultimo && player.play(ultimo, cola)}
+              >
+                {sonando && player.playing ? '❚❚' : '▶'}
+              </button>
+            </span>
           </div>
         </div>
       ) : (
@@ -126,7 +127,9 @@ export function ColumnistRow({ fila, cola }: Props) {
             Sin artículos recientes
             {fila.last_published_at && ` · el último, ${antiguedad(fila.days_since_last)}`}
           </span>
-          <Historicos fila={fila} abierto={abierto} alternar={alternarHistorico} />
+          <span className="col-acciones">
+            <Historicos fila={fila} abierto={abierto} alternar={alternarHistorico} />
+          </span>
         </div>
       )}
 
