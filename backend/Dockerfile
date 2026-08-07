@@ -50,6 +50,12 @@ RUN if [ "$INSTALL_PLAYWRIGHT" = "true" ]; then \
 
 COPY . .
 
+# Sello de construcción. Se escribe DESPUÉS de copiar el código, así que
+# Docker solo lo rehace cuando el código cambió: si el sello es de hace días,
+# es que la imagen no se reconstruyó, por muy actualizada que esté la carpeta.
+# «git pull» sin «docker compose up -d --build» deja justo esa trampa.
+RUN date -u +"%Y-%m-%d %H:%M UTC" > /app/BUILD_STAMP
+
 RUN mkdir -p /data/audio /data/piper /data/beat
 
 EXPOSE 8000

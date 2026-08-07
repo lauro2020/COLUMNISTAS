@@ -9,9 +9,11 @@ Cada componente se puede ejecutar y probar por separado:
     python -m app.cli audio --article 12      # genera el audio de un artículo
     python -m app.cli audio --missing         # genera todos los que falten
     python -m app.cli status                  # resumen del sistema
+    python -m app.cli version                 # ¿tengo la última versión?
     python -m app.cli check-password          # ¿por qué no me deja entrar?
     python -m app.cli check-sources           # prueba TODAS las fuentes
     python -m app.cli why "riva palacio"      # ¿por qué no llega nada de éste?
+    python -m app.cli fix-dates               # corrige fechas mal leídas
     python -m app.cli test-source 3           # prueba una fuente sin guardar
     python -m app.cli download-piper-voice es_MX-ald-medium
 """
@@ -123,8 +125,51 @@ def cmd_audio(args: argparse.Namespace) -> int:
     return 1
 
 
+def build_stamp() -> str:
+    """Cuándo se construyó la imagen que está corriendo ahora mismo."""
+    sello = Path("/app/BUILD_STAMP")
+    try:
+        return sello.read_text().strip()
+    except OSError:
+        return "desconocida (no se está ejecutando dentro del contenedor)"
+
+
+def _nombres_de_comandos() -> list[str]:
+    """Los subcomandos que reconoce esta versión.
+
+    argparse no ofrece una forma pública de preguntárselo, así que se busca
+    la acción de subcomandos a mano. Si algún día cambia por dentro, esto
+    devuelve una lista vacía en vez de tumbar el diagnóstico.
+    """
+    for accion in _build_parser()._actions:  # noqa: SLF001
+        opciones = getattr(accion, "choices", None)
+        if isinstance(opciones, dict) and opciones:
+            return list(opciones)
+    return []
+
+
+def cmd_version(_: argparse.Namespace) -> int:
+    """¿Está corriendo el código que acabo de traer, o el de antes?
+
+    El código del backend va dentro de la imagen, así que «git pull» sin
+    «docker compose up -d --build» deja los contenedores en la versión
+    anterior sin avisar: los comandos nuevos simplemente «no existen».
+    """
+    print(f"\nImagen construida el {build_stamp()}")
+    opciones = sorted(_nombres_de_comandos())
+    print(f"\nComandos disponibles ({len(opciones)}):")
+    for nombre in opciones:
+        print(f"  {nombre}")
+    print("\nSi falta alguno que esperabas, la reconstrucción no se aplicó:")
+    print("  docker compose up -d --build\n")
+    return 0
+
+
 def cmd_status(_: argparse.Namespace) -> int:
     from app.models import Article, Audio, AudioStatus, CollectionRun, Columnist
+
+    print(f"\nImagen construida: {build_stamp()}")
+    print("  (si es vieja, te falta:  docker compose up -d --build)")
 
     with session_scope() as db:
         columnists = db.scalars(select(Columnist).order_by(Columnist.name)).all()
@@ -381,6 +426,7 @@ def cmd_why(args: argparse.Namespace) -> int:
             print(f"  Feed RSS      {columnist.feed_url}")
         print(f"  Extractor     {get_extractor(columnist.source_url, columnist.extractor_key).key}")
         print(f"  Activo        {'sí' if columnist.active else 'NO — no se recolecta'}")
+        print(f"  Versión       imagen construida el {build_stamp()}")
         if columnist.browser_identity:
             print("  Identidad     se hace pasar por navegador")
         if columnist.consecutive_failures:
@@ -799,9 +845,13 @@ def cmd_download_piper(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
-def main() -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="columnistas", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser(
+        "version", help="qué versión de la app lleva este contenedor"
+    ).set_defaults(func=cmd_version)
 
     sub.add_parser("migrate", help="crea o actualiza las tablas").set_defaults(func=cmd_migrate)
     sub.add_parser("seed", help="carga los datos iniciales").set_defaults(func=cmd_seed)
@@ -854,7 +904,11 @@ def main() -> int:
     p_piper.add_argument("voice")
     p_piper.set_defaults(func=cmd_download_piper)
 
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
     return args.func(args)
 
 

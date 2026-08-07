@@ -216,6 +216,27 @@ Te imprime una tabla con las 21 fuentes, cuántos artículos encuentra cada una
 y el error exacto de las que fallan. Después, la pestaña **Fuentes** de la app
 muestra lo mismo con el histórico de los últimos días.
 
+### Actualizar a la última versión
+
+```bash
+sh tools/actualizar.sh
+```
+
+`git pull` **solo no basta**: el código del backend va dentro de la imagen de
+Docker, así que hace falta reconstruirla. Sin el `--build`, los contenedores
+siguen corriendo la versión anterior aunque los archivos del disco ya estén
+nuevos, y nada lo avisa: los comandos nuevos simplemente «no existen». Ese
+script hace las dos cosas y **comprueba al final** que quedó aplicada.
+
+Para preguntárselo en cualquier momento:
+
+```bash
+docker compose exec api python -m app.cli version
+```
+
+Imprime cuándo se construyó la imagen que está corriendo y qué comandos
+reconoce. Si falta uno que esperabas, la reconstrucción no se aplicó.
+
 ### Cuánto cuesta el audio con esta lista
 
 Con unas 15 columnas nuevas al día y la voz de OpenAI, ronda los **0.20 USD
