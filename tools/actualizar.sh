@@ -58,12 +58,38 @@ while [ "$INTENTO" -lt 30 ]; do
     sleep 2
 done
 
-if ! docker compose exec -T api python -m app.cli version 2>&1; then
+if docker compose exec -T api python -m app.cli version 2>&1; then
+    echo "  Si la fecha de construcción es de ahora mismo, ya estás al día."
     echo
-    echo "  ? No se pudo preguntar a la aplicación. Comprueba que los"
-    echo "    contenedores estén arriba:   docker compose ps"
-    exit 1
+    exit 0
 fi
 
-echo "  Si la fecha de construcción es de ahora mismo, ya estás al día."
+# --- No contesta: hay que decir por qué, no solo que no contesta -------------
 echo
+echo "  ✗ La aplicación no contesta. Esto es lo que le pasa:"
+echo
+echo "── Estado de cada contenedor ─────────────────────"
+docker compose ps
+
+echo
+echo "── Últimas líneas del registro de «api» ──────────"
+echo "  (el motivo del fallo suele ser la ÚLTIMA línea)"
+echo
+docker compose logs --tail 40 --no-color api 2>&1
+
+echo
+echo "── Espacio en disco ──────────────────────────────"
+# Quedarse sin disco es una causa habitual y despista mucho, porque el error
+# que sale no habla de disco: la imagen con navegador headless pesa ~2 GB y
+# cada reconstrucción deja atrás la anterior.
+docker system df 2>/dev/null | head -5
+echo
+echo "  Si «Images» ocupa muchos GB y te queda poco disco, libera lo viejo:"
+echo "      docker system prune -a -f"
+echo "  (borra imágenes sin usar; NO toca tus artículos ni tu base de datos,"
+echo "   que viven en volúmenes aparte)"
+
+echo
+echo "  Manda todo lo de arriba y te digo qué es."
+echo
+exit 1
