@@ -198,6 +198,78 @@ def cmd_test_source(args: argparse.Namespace) -> int:
     return 0
 
 
+def _autopsia_de_la_pagina(columnist, fetcher) -> None:
+    """Cuando no se reconoce ningún artículo, describir la página.
+
+    Es lo que hace falta para escribir el extractor que le falta a ese medio,
+    y no se puede adivinar desde fuera: hay que ver cómo agrupa sus enlaces,
+    si trae un feed escondido, y si el listado lo pinta el servidor o el
+    JavaScript del navegador.
+    """
+    from collections import Counter
+    from urllib.parse import urljoin, urlparse
+
+    from bs4 import BeautifulSoup
+
+    from app.collector import rss
+
+    print("\n  Radiografía de la página, para saber qué extractor le falta:\n")
+
+    pagina = fetcher.get(columnist.source_url)
+    if not pagina.ok:
+        print(f"    No se pudo releer: {pagina.error}")
+        return
+
+    html = pagina.text or ""
+    soup = BeautifulSoup(html, "lxml")
+    print(f"    Dirección final   {pagina.url}")
+    print(f"    Tamaño            {len(html):,} caracteres")
+
+    # ¿La pinta el servidor o el navegador?
+    pistas_js = [n for n in ("__NEXT_DATA__", "__NUXT__", "Fusion.globalContent",
+                             "window.__INITIAL_STATE__", "application/ld+json")
+                 if n in html]
+    print(f"    Datos incrustados {', '.join(pistas_js) if pistas_js else 'ninguno reconocible'}")
+
+    # ¿Hay un feed que nos ahorre el trabajo?
+    feed = rss.discover_feed_url(html, pagina.url)
+    if feed:
+        print(f"    Feed anunciado    {feed}   ← con esto basta")
+    else:
+        print("    Feed anunciado    no")
+
+    enlaces = [a.get("href") for a in soup.find_all("a", href=True)]
+    absolutos = []
+    for href in enlaces:
+        if not href or href.startswith(("#", "mailto:", "javascript:")):
+            continue
+        completo = urljoin(pagina.url, href)
+        if urlparse(completo).netloc == urlparse(pagina.url).netloc:
+            absolutos.append(urlparse(completo).path)
+
+    print(f"    Enlaces al propio medio  {len(absolutos)}")
+    if not absolutos:
+        print("\n    Cero enlaces internos: la lista la pinta el JavaScript.")
+        print("    Prueba a activar el navegador headless para este columnista")
+        print("    (Ajustes › Columnistas › Editar › «Identificarse como")
+        print("    navegador») y vuelve a ejecutar esto.")
+        return
+
+    # Agrupar por los dos primeros tramos de la ruta: ahí se ve enseguida
+    # dónde vive el contenido y dónde el menú de navegación.
+    def familia(path: str) -> str:
+        tramos = [t for t in path.split("/") if t]
+        return "/" + "/".join(tramos[:2]) if tramos else "/"
+
+    grupos = Counter(familia(p) for p in absolutos)
+    print("\n    Cómo se agrupan esos enlaces (los 12 grupos mayores):\n")
+    for prefijo, cuantos in grupos.most_common(12):
+        ejemplo = next(p for p in absolutos if familia(p) == prefijo)
+        print(f"      {cuantos:>4}  {prefijo:<28}  p.ej. {ejemplo[:60]}")
+
+    print("\n    Pega esta radiografía y se puede escribir el extractor que falta.")
+
+
 def cmd_fix_dates(args: argparse.Namespace) -> int:
     """Corrige las fechas mal leídas de los artículos ya guardados.
 
@@ -357,9 +429,23 @@ def cmd_why(args: argparse.Namespace) -> int:
 
             if not refs:
                 print("\n  ✗ La página abre, pero no se reconoció ningún artículo en ella.")
-                print("    Suele significar que la dirección del autor cambió, o que")
-                print("    el medio ahora pinta la lista con JavaScript.")
-                print(f"    Ábrela tú en el navegador: {columnist.source_url}\n")
+
+                # Antes de dar el parte, probar con el navegador: si el medio
+                # pinta la lista con JavaScript, esto la resuelve de una vez.
+                con_navegador = fetcher.get(columnist.source_url, use_browser=True)
+                if con_navegador.ok:
+                    refs = extractor.discover_from_html(
+                        con_navegador.text, con_navegador.url
+                    )
+                if refs:
+                    print(f"\n  ✓ Pero con el navegador headless sí: {len(refs)} artículos.")
+                    print("    Esta fuente pinta su lista con JavaScript. Actívaselo en")
+                    print("    Ajustes › Columnistas › Editar › «Identificarse como")
+                    print("    navegador», y comprueba que ENABLE_HEADLESS_BROWSER e")
+                    print("    INSTALL_PLAYWRIGHT estén en «true» dentro del .env.\n")
+                    return 0
+
+                _autopsia_de_la_pagina(columnist, fetcher)
                 return 1
 
             urls = [normalize.canonicalize_url(r.url) for r in refs]
