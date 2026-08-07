@@ -198,6 +198,50 @@ def cmd_test_source(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fix_dates(args: argparse.Namespace) -> int:
+    """Corrige las fechas mal leídas de los artículos ya guardados.
+
+    Cuando la fecha se sacaba del texto de la página se podía colar la de una
+    nota vecina, y entonces una columna de ayer quedaba fechada hace meses y
+    desaparecía del principio de la lista. La dirección del artículo suele
+    llevar la fecha buena (/2026/08/06/): esto la recupera.
+    """
+    from app.collector import dates as fechas
+    from app.collector.runner import TOLERANCIA_DE_FECHA
+    from app.models import Article
+
+    with session_scope() as db:
+        articulos = db.scalars(select(Article).order_by(Article.id)).all()
+        cambios = []
+        for art in articulos:
+            de_url = fechas.from_url(art.canonical_url) or fechas.from_url(art.original_url)
+            if de_url is None or art.published_at is None:
+                continue
+            if abs(fechas.ensure_aware(art.published_at) - de_url) <= TOLERANCIA_DE_FECHA:
+                continue
+            cambios.append((art, fechas.ensure_aware(art.published_at), de_url))
+
+        if not cambios:
+            print("\n✓ Ninguna fecha que corregir: todas concuerdan con su dirección.\n")
+            return 0
+
+        print(f"\n{len(cambios)} artículo(s) con la fecha equivocada:\n")
+        for art, antes, despues in cambios:
+            print(f"  {antes:%d/%m/%Y} → {despues:%d/%m/%Y}   {art.title[:52]}")
+
+        if not args.apply:
+            print("\n  Esto ha sido solo una vista previa; no se ha tocado nada.")
+            print("  Para aplicarlo:   python -m app.cli fix-dates --apply\n")
+            return 0
+
+        for art, _, despues in cambios:
+            art.published_at = despues
+        db.flush()
+        print(f"\n✓ {len(cambios)} fecha(s) corregida(s).\n")
+
+    return 0
+
+
 def _buscar_columnista(db, aguja: str):
     """Encuentra un columnista por id o por un trozo de su nombre."""
     from app.models import Columnist
@@ -702,6 +746,12 @@ def main() -> int:
     p_check.add_argument("--all", action="store_true",
                          help="incluir también las fuentes desactivadas")
     p_check.set_defaults(func=cmd_check_sources)
+
+    p_fix = sub.add_parser(
+        "fix-dates", help="corrige fechas mal leídas usando la dirección del artículo")
+    p_fix.add_argument("--apply", action="store_true",
+                       help="aplicar los cambios (sin esto solo se enseñan)")
+    p_fix.set_defaults(func=cmd_fix_dates)
 
     p_why = sub.add_parser(
         "why", help="explica por qué no llegan artículos de un columnista")

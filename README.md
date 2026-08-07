@@ -577,6 +577,10 @@ docker compose exec api python -m app.cli check-sources
 # enlace de su página: ya guardado, demasiado viejo, o por qué no se extrajo
 docker compose exec api python -m app.cli why "riva palacio"
 
+# Corregir fechas mal leídas de artículos ya guardados (primero enseña, y
+# solo toca la base de datos si añades --apply)
+docker compose exec api python -m app.cli fix-dates
+
 # Probar una sola fuente SIN guardar nada: ¿responde? ¿qué extrae?
 docker compose exec api python -m app.cli test-source 3
 
@@ -715,6 +719,7 @@ docker compose exec api python -m app.cli check-sources
 | Un columnista dice «Sin artículos recientes» | Su última columna recopilada tiene más de 15 días. La leyenda dice cuánto hace; su histórico completo sigue disponible en la pestaña **históricos** de su fila. |
 | Una fuente en rojo | El medio cambió su web. Prueba `test-source <id>`; si el genérico tampoco saca nada, hará falta ajustar el extractor. |
 | Un columnista que sí bajaba y de pronto se quedó atrás | `python -m app.cli why "<parte del nombre>"`. Reproduce en vivo la recolección y da el veredicto de cada enlace de su página: ya guardado, demasiado viejo, o el motivo exacto por el que no se pudo extraer. |
+| Una columna reciente aparece fechada meses atrás | La fecha se leyó de la barra lateral de la página, no del artículo. Ya no debería pasar (manda la fecha de la dirección), pero lo ya guardado se arregla con `python -m app.cli fix-dates --apply`. |
 | Textos truncados o "de pago" | Faltan las cookies de tu suscripción, o caducaron. Ver [Medios de pago](#medios-de-pago). |
 | El audio dice "falló" | Casi siempre es la clave de OpenAI (ausente, sin saldo o con el límite alcanzado). El error completo se ve al abrir el artículo. |
 | El audio no suena en el teléfono | Descarga el día primero si estás sin conexión; y comprueba que la app va por HTTPS. |

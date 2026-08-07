@@ -98,6 +98,35 @@ def _from_jsonld(soup: BeautifulSoup) -> dt.datetime | None:
     return None
 
 
+#: /2026/08/06/ y /2026-08-06/ dentro de la dirección del artículo
+URL_DATE = re.compile(r"/(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:/|-|$)")
+
+
+def from_url(url: str | None) -> dt.datetime | None:
+    """La fecha que muchos medios llevan en la propia dirección.
+
+    Es la fuente más fiable que hay: forma parte de la dirección del
+    artículo, no cambia, y no se puede confundir con la de una nota vecina.
+    Se descarta lo que no sea una fecha plausible.
+    """
+    if not url:
+        return None
+    match = URL_DATE.search(url)
+    if not match:
+        return None
+    año, mes, día = (int(g) for g in match.groups())
+    if not (2000 <= año <= 2100):
+        return None
+    try:
+        fecha = dt.datetime(año, mes, día, 12, 0, tzinfo=local_tz())
+    except ValueError:  # 31 de febrero y demás imposibles
+        return None
+    # Una fecha en el futuro es una dirección mal leída, no una primicia
+    if fecha.date() > dt.datetime.now(local_tz()).date() + dt.timedelta(days=1):
+        return None
+    return fecha
+
+
 def extract_published_at(soup: BeautifulSoup, html: str = "") -> dt.datetime | None:
     found = _from_jsonld(soup)
     if found:

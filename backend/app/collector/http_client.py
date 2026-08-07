@@ -328,6 +328,32 @@ class Fetcher:
         # 2s, 4s, 8s... con un poco de aleatoriedad para no sincronizar reintentos
         time.sleep(min(2 ** (attempt + 1), 30) + random.uniform(0, 1))
 
+    @staticmethod
+    def _contenido_estable(page, intentos: int = 3) -> str:
+        """Lee el HTML esperando a que la página deje de moverse.
+
+        Pedir el contenido justo mientras el navegador está saltando a otra
+        dirección falla con «the page is navigating and changing the
+        content». Pasa siempre en los muros de pago, que redirigen a su
+        pantalla de acceso con JavaScript un instante después de cargar. Se
+        espera a que se asiente y se reintenta; así el error que sale es el
+        de verdad —«no reconoció tu sesión de suscriptor»— y no un fallo
+        interno del navegador que no le dice nada a nadie.
+        """
+        ultimo: Exception | None = None
+        for intento in range(intentos):
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=5000)
+            except Exception:  # noqa: BLE001 - agotar la espera no es fatal
+                pass
+            try:
+                return page.content()
+            except Exception as exc:  # noqa: BLE001
+                ultimo = exc
+                if intento < intentos - 1:
+                    page.wait_for_timeout(1000)
+        raise ultimo if ultimo else RuntimeError("no se pudo leer la página")
+
     def _get_with_browser(self, url: str) -> FetchResult:
         """Renderiza con Chromium. Solo si el sitio necesita JavaScript."""
         started = time.monotonic()
@@ -362,7 +388,7 @@ class Fetcher:
                     timeout=settings.request_timeout_seconds * 1000,
                 )
                 page.wait_for_timeout(1500)
-                html = page.content()
+                html = self._contenido_estable(page)
                 final_url = page.url
                 # El navegador también puede recibir un 403: no darlo por bueno.
                 status = response.status if response is not None else 200

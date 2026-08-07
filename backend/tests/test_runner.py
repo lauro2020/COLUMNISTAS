@@ -309,3 +309,57 @@ def test_no_se_traen_columnas_mas_viejas_que_el_limite(db):
 
     assert [r.url for r in vivos] == ["https://diario.test/a"]
     assert any("más viejos" in d for d in descartes)
+
+
+# ---------------------------------------------------------------------------
+# La fecha que va dentro de la dirección
+# ---------------------------------------------------------------------------
+COLUMNA_CON_FECHA_AJENA = """
+<html><head><title>La de hoy</title>
+<meta property="og:title" content="La de hoy">
+<link rel="canonical" href="https://diario.test/opinion/quien/2026/08/06/la-de-hoy/">
+</head><body>
+  <aside>Lo mas leido: una nota vieja del 3 de febrero de 2026</aside>
+  <article><h1>La de hoy</h1><div class="cuerpo-nota">
+  <p>Primer parrafo con suficiente texto como para que el limpiador de bloques
+     no lo tire, hablando de la reforma que discute el Congreso esta semana.</p>
+  <p>Segundo parrafo que insiste en el asunto y aporta cifras concretas, de modo
+     que el conteo de palabras supere con holgura el minimo exigido.</p>
+  <p>Tercer parrafo de cierre, tambien largo, para que no queden dudas de que
+     esta columna se extrajo entera y debe guardarse sin ningun problema.</p>
+  </div></article>
+</body></html>
+"""
+
+
+@respx.mock
+def test_una_fecha_de_la_barra_lateral_no_desplaza_a_la_columna(db):
+    """El fallo real: la columna de ayer acababa fechada meses atrás.
+
+    Bastaba con que en la página asomara la fecha de otra nota para que el
+    artículo se hundiera al fondo de la lista, sin que nada diera error.
+    """
+    from app.collector.runner import collect_all
+    from app.models import Article
+
+    respx.get("https://diario.test/opinion/quien/").mock(
+        return_value=httpx.Response(
+            200,
+            text=PAGINA_DEL_AUTOR.replace("2026/08/06/la-nueva/", "2026/08/06/la-de-hoy/"),
+        )
+    )
+    respx.get("https://diario.test/opinion/quien/2026/08/06/la-de-hoy").mock(
+        return_value=httpx.Response(200, text=COLUMNA_CON_FECHA_AJENA)
+    )
+    respx.get("https://diario.test/opinion/quien/2026/08/05/la-recortada").mock(
+        return_value=httpx.Response(200, text=COLUMNA_RECORTADA)
+    )
+    columnista = _columnista(db)
+
+    collect_all(db, columnist_ids=[columnista.id])
+
+    guardado = db.scalar(select(Article).where(Article.title == "La de hoy"))
+    assert guardado is not None
+    assert guardado.published_at.date() == dt.date(2026, 8, 6), (
+        "debía ganar la fecha de la dirección, no la de la barra lateral"
+    )

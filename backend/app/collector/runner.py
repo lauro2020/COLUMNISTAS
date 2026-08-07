@@ -292,6 +292,11 @@ def _filter_candidates(
     descartes: list[str] = []
     for ref in refs:
         ref.url = normalize.canonicalize_url(ref.url)
+        # Muchas páginas de autor listan los enlaces sin fecha. Si la dirección
+        # la lleva dentro, se aprovecha: así el filtro de antigüedad y el orden
+        # "lo más nuevo primero" funcionan también en esas fuentes.
+        if ref.published_at is None:
+            ref.published_at = dates.from_url(ref.url)
         if ref.url in existing:
             descartes.append("ya estaban guardados")
             continue
@@ -322,7 +327,39 @@ def _extract_article(extractor, ref: ArticleRef, fetcher: Fetcher) -> ExtractedA
         article.published_at = ref.published_at
     if article and ref.title and (not article.title or article.title == "Sin título"):
         article.title = ref.title
+    if article:
+        article.published_at = _mejor_fecha(article.published_at, ref.url)
     return article
+
+
+#: cuánto puede discrepar la fecha de la página de la que trae la dirección
+#: antes de considerar que la de la página es de otra nota (zona horaria y
+#: "actualizado el…" caben de sobra en dos días)
+TOLERANCIA_DE_FECHA = dt.timedelta(days=2)
+
+
+def _mejor_fecha(leida: dt.datetime | None, url: str) -> dt.datetime | None:
+    """Si la dirección trae fecha, casi siempre gana.
+
+    Rascar la fecha del HTML es frágil: basta con que en la barra lateral
+    asome una nota vieja para acabar fechando la columna de hoy hace un mes,
+    y entonces desaparece del principio de la lista sin que nada dé error.
+    La fecha que va dentro de la dirección (/2026/08/06/) no tiene ese
+    problema, así que se usa cuando no hay otra o cuando la otra se aleja
+    demasiado como para ser la misma columna.
+    """
+    de_url = dates.from_url(url)
+    if de_url is None:
+        return leida
+    if leida is None:
+        return de_url
+    if abs(dates.ensure_aware(leida) - de_url) > TOLERANCIA_DE_FECHA:
+        log.info(
+            "Fecha corregida por la dirección: %s decía %s, la dirección dice %s",
+            url, leida.date(), de_url.date(),
+        )
+        return de_url
+    return leida
 
 
 def _persist(
