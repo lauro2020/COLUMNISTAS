@@ -11,6 +11,7 @@ Cada componente se puede ejecutar y probar por separado:
     python -m app.cli status                  # resumen del sistema
     python -m app.cli check-password          # ¿por qué no me deja entrar?
     python -m app.cli check-sources           # prueba TODAS las fuentes
+    python -m app.cli why "riva palacio"      # ¿por qué no llega nada de éste?
     python -m app.cli test-source 3           # prueba una fuente sin guardar
     python -m app.cli download-piper-voice es_MX-ald-medium
 """
@@ -179,6 +180,228 @@ def cmd_test_source(args: argparse.Namespace) -> int:
                           f"muro de pago: {article.is_paywalled}")
                     if article.blocks:
                         print(f"  inicio: {article.blocks[0]['text'][:200]}…")
+    return 0
+
+
+def _buscar_columnista(db, aguja: str):
+    """Encuentra un columnista por id o por un trozo de su nombre."""
+    from app.models import Columnist
+
+    if aguja.isdigit():
+        return db.get(Columnist, int(aguja)), []
+
+    patron = f"%{aguja.strip().lower()}%"
+    encontrados = list(
+        db.scalars(
+            select(Columnist).where(func.lower(Columnist.name).like(patron))
+            .order_by(Columnist.name)
+        ).all()
+    )
+    if len(encontrados) == 1:
+        return encontrados[0], []
+    return None, encontrados
+
+
+def cmd_why(args: argparse.Namespace) -> int:
+    """Explica, artículo por artículo, por qué no llega nada de una fuente.
+
+    `check-sources` dice si la fuente responde; esto va un paso más allá y
+    reproduce en vivo lo que hace la recolección de cada mañana, enseñando
+    el veredicto de cada candidato: si ya estaba guardado, si es demasiado
+    viejo, si llegó vacío por un muro de pago, o si sí entraría.
+    """
+    import datetime as dt
+
+    # Este comando se lee, no se depura: los apuntes de httpx sobre cada
+    # petición estorban más de lo que ayudan.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    from app.collector import dates as fechas
+    from app.collector import normalize
+    from app.collector.extractors.registry import get_extractor
+    from app.collector.http_client import Fetcher
+    from app.collector.runner import (
+        MAX_AGE_DAYS,
+        MAX_ARTICLES_FIRST_RUN,
+        MAX_ARTICLES_PER_SOURCE,
+        _discover,
+        cookies_for_outlet,
+    )
+    from app.models import Article
+
+    with session_scope() as db:
+        columnist, parecidos = _buscar_columnista(db, args.columnista)
+        if columnist is None:
+            if parecidos:
+                print("Hay varios que encajan. Repite con el número:\n", file=sys.stderr)
+                for c in parecidos:
+                    print(f"  {c.id:>4}  {c.name} ({c.outlet})", file=sys.stderr)
+            else:
+                print(f"No encontré ningún columnista con «{args.columnista}».",
+                      file=sys.stderr)
+                print("Lista completa:   python -m app.cli check-sources", file=sys.stderr)
+            return 1
+
+        print(f"\n{'=' * 74}")
+        print(f"  {columnist.name} — {columnist.outlet}   (id {columnist.id})")
+        print(f"{'=' * 74}")
+        print(f"  Página        {columnist.source_url}")
+        if columnist.feed_url:
+            print(f"  Feed RSS      {columnist.feed_url}")
+        print(f"  Extractor     {get_extractor(columnist.source_url, columnist.extractor_key).key}")
+        print(f"  Activo        {'sí' if columnist.active else 'NO — no se recolecta'}")
+        if columnist.browser_identity:
+            print("  Identidad     se hace pasar por navegador")
+        if columnist.consecutive_failures:
+            print(f"  Fallos        {columnist.consecutive_failures} seguidos")
+        if columnist.last_error:
+            print(f"  Último error  {columnist.last_error[:200]}")
+
+        # --- Lo que ya está guardado ---------------------------------------
+        guardados = list(
+            db.scalars(
+                select(Article)
+                .where(Article.columnist_id == columnist.id)
+                .order_by(Article.published_at.desc())
+                .limit(5)
+            ).all()
+        )
+        total = db.scalar(
+            select(func.count(Article.id)).where(Article.columnist_id == columnist.id)
+        ) or 0
+        print(f"\n  Ya guardados: {total}")
+        for art in guardados:
+            fecha = art.published_at.strftime("%d/%m/%Y") if art.published_at else "sin fecha"
+            print(f"    {fecha}  {art.title[:56]}")
+        if not guardados:
+            print("    (ninguno todavía)")
+
+        cookies = cookies_for_outlet(db, columnist.outlet)
+        extractor = get_extractor(columnist.source_url, columnist.extractor_key)
+        es_primera_vez = total == 0
+        tope = MAX_ARTICLES_FIRST_RUN if es_primera_vez else MAX_ARTICLES_PER_SOURCE
+
+        print(f"\n{'-' * 74}")
+        print("  Lo que ve la recolección AHORA MISMO en la página del autor")
+        print(f"{'-' * 74}")
+
+        with Fetcher(
+            cookies=cookies, browser_identity=columnist.browser_identity
+        ) as fetcher:
+            try:
+                refs = _discover(columnist, extractor, fetcher, db)
+            except Exception as exc:  # noqa: BLE001
+                print(f"\n  ✗ Ni siquiera se pudo abrir la fuente:\n    {exc}\n")
+                print("  Esto es un problema de acceso, no de extracción. Prueba:")
+                print("    python -m app.cli doctor\n")
+                return 1
+
+            if not refs:
+                print("\n  ✗ La página abre, pero no se reconoció ningún artículo en ella.")
+                print("    Suele significar que la dirección del autor cambió, o que")
+                print("    el medio ahora pinta la lista con JavaScript.")
+                print(f"    Ábrela tú en el navegador: {columnist.source_url}\n")
+                return 1
+
+            urls = [normalize.canonicalize_url(r.url) for r in refs]
+            existentes = set(
+                db.scalars(
+                    select(Article.canonical_url).where(Article.canonical_url.in_(urls))
+                ).all()
+            )
+            corte = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=MAX_AGE_DAYS)
+
+            print(f"\n  Encontró {len(refs)} enlaces. Veredicto de cada uno:\n")
+
+            candidatos = []
+            for ref in refs[: args.limit]:
+                ref.url = normalize.canonicalize_url(ref.url)
+                fecha = fechas.ensure_aware(ref.published_at) if ref.published_at else None
+                etiqueta = fecha.strftime("%d/%m/%Y") if fecha else "sin fecha"
+                # Muchas páginas de autor no traen el titular en el enlace; en
+                # ese caso el final de la dirección se lee lo bastante bien.
+                titulo = ref.title or ref.url.rstrip("/").rsplit("/", 1)[-1].replace("-", " ")
+
+                if ref.url in existentes:
+                    veredicto = "· ya guardado"
+                elif fecha and fecha < corte:
+                    veredicto = f"· descartado por viejo (más de {MAX_AGE_DAYS} días)"
+                else:
+                    veredicto = "→ CANDIDATO"
+                    candidatos.append(ref)
+                print(f"    {etiqueta:>10}  {str(titulo)[:44]:<46} {veredicto}")
+
+            if len(refs) > args.limit:
+                print(f"    … y {len(refs) - args.limit} más (usa --limit para verlos)")
+
+            if not candidatos:
+                print("\n  → Todo lo que publica esta página ya está en tu base de datos,")
+                print("    o es más viejo que el límite. Si esperabas una columna de hoy")
+                print("    y no aparece arriba, es que el medio todavía no la ha puesto")
+                print("    en la página del autor.\n")
+                return 0
+
+            print(f"\n  {len(candidatos)} candidato(s) nuevo(s). "
+                  f"La recolección procesa {tope} por vuelta.")
+            print(f"\n{'-' * 74}")
+            print("  Extrayendo el texto de los candidatos (esto es lo que suele fallar)")
+            print(f"{'-' * 74}\n")
+
+            problemas = []
+            for ref in candidatos[: args.limit]:
+                try:
+                    article = extractor.extract(ref.url, fetcher)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"    ✗ {ref.url}")
+                    print(f"      Error al extraer: {type(exc).__name__}: {exc}")
+                    problemas.append("error")
+                    continue
+                if article is None:
+                    print(f"    ✗ {ref.url}")
+                    print("      No se pudo sacar el texto de la página.")
+                    problemas.append("sin texto")
+                    continue
+
+                texto = normalize.blocks_to_text(article.blocks)
+                palabras = normalize.count_words(texto)
+                if palabras < 30 and not article.is_paywalled:
+                    marca, nota = "✗", f"solo {palabras} palabras: SE DESCARTA por vacío"
+                    problemas.append("vacío")
+                elif article.is_paywalled:
+                    marca, nota = "~", f"{palabras} palabras, detectado MURO DE PAGO"
+                    problemas.append("muro de pago")
+                else:
+                    marca, nota = "✓", f"{palabras} palabras: se guardaría"
+                print(f"    {marca} «{article.title[:56]}»")
+                print(f"      {nota}")
+                if article.blocks:
+                    print(f"      empieza: {article.blocks[0]['text'][:110]}…")
+                print()
+
+        # --- Qué hacer -----------------------------------------------------
+        print(f"\n{'-' * 74}")
+        print("  Qué hacer")
+        print(f"{'-' * 74}")
+        if not problemas:
+            print("\n  Nada está roto. Estos artículos entrarán en la próxima")
+            print("  recolección. Para no esperar a mañana:")
+            print(f"    python -m app.cli collect --columnist {columnist.id}\n")
+        elif "muro de pago" in problemas or "vacío" in problemas:
+            print("\n  El medio está sirviendo la columna recortada: la app llega a")
+            print("  la página pero solo recibe el primer párrafo o nada.")
+            print("\n  1. Guarda tus cookies de suscriptor de este medio:")
+            print("     en la app, Ajustes › Credenciales por medio ›")
+            print(f"     «{columnist.outlet}».")
+            print("  2. Si ya las tienes guardadas, puede que hayan caducado:")
+            print("     vuelve a copiarlas desde el navegador.")
+            print("  3. Si no eres suscriptor de este medio, no hay nada que")
+            print("     hacer: la app solo puede leer lo que tú puedes leer.\n")
+        else:
+            print("\n  La página del autor se lee, pero los artículos no. Suele ser")
+            print("  que el medio cambió la plantilla. Prueba a activar el navegador")
+            print("  headless para este columnista (Ajustes › Columnistas › Editar ›")
+            print("  «Identificarse como navegador») y vuelve a ejecutar esto.\n")
+
     return 0
 
 
@@ -464,6 +687,13 @@ def main() -> int:
     p_check.add_argument("--all", action="store_true",
                          help="incluir también las fuentes desactivadas")
     p_check.set_defaults(func=cmd_check_sources)
+
+    p_why = sub.add_parser(
+        "why", help="explica por qué no llegan artículos de un columnista")
+    p_why.add_argument("columnista", help="id o parte del nombre")
+    p_why.add_argument("--limit", type=int, default=8,
+                       help="cuántos enlaces mirar (por defecto 8)")
+    p_why.set_defaults(func=cmd_why)
 
     p_test = sub.add_parser("test-source", help="prueba una fuente sin guardar nada")
     p_test.add_argument("columnist_id", type=int)

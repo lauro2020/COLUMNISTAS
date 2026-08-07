@@ -573,6 +573,10 @@ docker compose exec api python -m app.cli collect --columnist 2
 # Probar TODAS las fuentes de una vez y ver cuáles fallan
 docker compose exec api python -m app.cli check-sources
 
+# ¿Por qué no me llega nada de este columnista? Enseña el veredicto de cada
+# enlace de su página: ya guardado, demasiado viejo, o por qué no se extrajo
+docker compose exec api python -m app.cli why "riva palacio"
+
 # Probar una sola fuente SIN guardar nada: ¿responde? ¿qué extrae?
 docker compose exec api python -m app.cli test-source 3
 
@@ -710,6 +714,7 @@ docker compose exec api python -m app.cli check-sources
 | No aparece ninguna columna | Pestaña **Fuentes**: ahí se ve el error exacto de cada medio. |
 | Un columnista dice «Sin artículos recientes» | Su última columna recopilada tiene más de 15 días. La leyenda dice cuánto hace; su histórico completo sigue disponible en la pestaña **históricos** de su fila. |
 | Una fuente en rojo | El medio cambió su web. Prueba `test-source <id>`; si el genérico tampoco saca nada, hará falta ajustar el extractor. |
+| Un columnista que sí bajaba y de pronto se quedó atrás | `python -m app.cli why "<parte del nombre>"`. Reproduce en vivo la recolección y da el veredicto de cada enlace de su página: ya guardado, demasiado viejo, o el motivo exacto por el que no se pudo extraer. |
 | Textos truncados o "de pago" | Faltan las cookies de tu suscripción, o caducaron. Ver [Medios de pago](#medios-de-pago). |
 | El audio dice "falló" | Casi siempre es la clave de OpenAI (ausente, sin saldo o con el límite alcanzado). El error completo se ve al abrir el artículo. |
 | El audio no suena en el teléfono | Descarga el día primero si estás sin conexión; y comprueba que la app va por HTTPS. |

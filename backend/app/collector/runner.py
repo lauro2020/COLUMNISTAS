@@ -99,17 +99,28 @@ def collect_all(
             columnist_id=columnist.id,
             columnist_name=f"{columnist.name} ({columnist.outlet})",
         )
+        notas: list[str] = []
         try:
-            new_ids, found = collect_one(db, columnist)
+            new_ids, found = collect_one(db, columnist, notas)
             source_run.status = RunStatus.ok if found else RunStatus.degraded
             source_run.articles_found = found
             source_run.articles_new = len(new_ids)
             source_run.extractor_used = columnist.extractor_key or "auto"
-            if not found:
-                source_run.error_message = (
-                    "La fuente respondió pero no se encontró ningún artículo. "
-                    "Puede ser normal si el columnista no publicó hoy."
-                )
+            # Cuando no entra nada nuevo hay que decir por qué. Antes la
+            # pantalla de Fuentes se limitaba a «puede ser normal si no
+            # publicó hoy», que tapaba por igual el día tranquilo y el
+            # extractor roto.
+            if not new_ids:
+                if not notas:
+                    source_run.error_message = (
+                        "La fuente respondió pero no se encontró ningún "
+                        "artículo. Puede ser normal si el columnista no "
+                        "publicó hoy."
+                    )
+                else:
+                    source_run.error_message = (
+                        "No entró nada nuevo: " + resumen_notas(notas)
+                    )
             columnist.consecutive_failures = 0
             columnist.last_success_at = dt.datetime.now(dt.timezone.utc)
             columnist.last_error = None
@@ -139,8 +150,27 @@ def collect_all(
     return result
 
 
-def collect_one(db: Session, columnist: Columnist) -> tuple[list[int], int]:
-    """Recolecta una sola fuente. Devuelve (ids nuevos, artículos encontrados)."""
+def resumen_notas(notas: list[str]) -> str:
+    """Agrupa los motivos de descarte en una frase corta y legible."""
+    if not notas:
+        return "sin detalle"
+    cuenta: dict[str, int] = {}
+    for nota in notas:
+        cuenta[nota] = cuenta.get(nota, 0) + 1
+    partes = [f"{n} {motivo}" if n > 1 else motivo for motivo, n in cuenta.items()]
+    return "; ".join(partes)
+
+
+def collect_one(
+    db: Session, columnist: Columnist, notas: list[str] | None = None
+) -> tuple[list[int], int]:
+    """Recolecta una sola fuente. Devuelve (ids nuevos, artículos encontrados).
+
+    En `notas`, si se pasa, se deja el motivo por el que cada candidato no
+    acabó guardado. Es lo que permite responder «¿por qué no me llega nada
+    de este columnista?» sin tener que leer los registros del contenedor.
+    """
+    apuntes = notas if notas is not None else []
     cookies = cookies_for_outlet(db, columnist.outlet)
     extractor = get_extractor(columnist.source_url, columnist.extractor_key)
 
@@ -149,7 +179,8 @@ def collect_one(db: Session, columnist: Columnist) -> tuple[list[int], int]:
     ) as fetcher:
         try:
             refs = _discover(columnist, extractor, fetcher, db)
-            refs = _filter_candidates(db, columnist, refs)
+            refs, descartes = _filter_candidates(db, columnist, refs)
+            apuntes.extend(descartes)
 
             es_primera_vez = not db.scalar(
                 select(func.count(Article.id)).where(
@@ -157,6 +188,10 @@ def collect_one(db: Session, columnist: Columnist) -> tuple[list[int], int]:
                 )
             )
             tope = MAX_ARTICLES_FIRST_RUN if es_primera_vez else MAX_ARTICLES_PER_SOURCE
+            if len(refs) > tope:
+                apuntes.append(
+                    f"{len(refs) - tope} quedaron fuera del tope de {tope} por vuelta"
+                )
 
             new_ids: list[int] = []
             for ref in refs[:tope]:
@@ -164,12 +199,19 @@ def collect_one(db: Session, columnist: Columnist) -> tuple[list[int], int]:
                     article = _extract_article(extractor, ref, fetcher)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("No se pudo extraer %s: %s", ref.url, exc)
+                    apuntes.append(f"error al extraer ({type(exc).__name__})")
                     continue
                 if article is None:
+                    apuntes.append(
+                        "la página no dejó extraer el texto "
+                        "(¿muro de pago, o carga con JavaScript?)"
+                    )
                     continue
-                saved = _persist(db, columnist, article, ref)
+                saved, motivo = _persist(db, columnist, article, ref)
                 if saved is not None:
                     new_ids.append(saved)
+                else:
+                    apuntes.append(motivo)
         finally:
             # Si hubo que corregir el dominio (con o sin "www.") se guarda,
             # para no repetir la consulta fallida cada mañana. Si esto fallara,
@@ -231,10 +273,14 @@ def _discover(
 
 def _filter_candidates(
     db: Session, columnist: Columnist, refs: list[ArticleRef]
-) -> list[ArticleRef]:
-    """Descarta lo ya guardado y lo demasiado antiguo."""
+) -> tuple[list[ArticleRef], list[str]]:
+    """Descarta lo ya guardado y lo demasiado antiguo.
+
+    Devuelve los candidatos que siguen vivos y, aparte, el motivo por el que
+    se cayó cada uno de los demás.
+    """
     if not refs:
-        return []
+        return [], []
 
     urls = [normalize.canonicalize_url(r.url) for r in refs]
     existing = set(
@@ -243,17 +289,20 @@ def _filter_candidates(
 
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=MAX_AGE_DAYS)
     fresh: list[ArticleRef] = []
+    descartes: list[str] = []
     for ref in refs:
         ref.url = normalize.canonicalize_url(ref.url)
         if ref.url in existing:
+            descartes.append("ya estaban guardados")
             continue
         if ref.published_at and dates.ensure_aware(ref.published_at) < cutoff:
+            descartes.append(f"más viejos de {MAX_AGE_DAYS} días")
             continue
         fresh.append(ref)
 
     # Los más recientes primero; los que no traen fecha van después
     fresh.sort(key=lambda r: (r.published_at is None, -(r.published_at or cutoff).timestamp()))
-    return fresh
+    return fresh, descartes
 
 
 def _extract_article(extractor, ref: ArticleRef, fetcher: Fetcher) -> ExtractedArticle | None:
@@ -278,13 +327,13 @@ def _extract_article(extractor, ref: ArticleRef, fetcher: Fetcher) -> ExtractedA
 
 def _persist(
     db: Session, columnist: Columnist, extracted: ExtractedArticle, ref: ArticleRef
-) -> int | None:
-    """Guarda el artículo. Devuelve su id, o None si era duplicado."""
+) -> tuple[int | None, str]:
+    """Guarda el artículo. Devuelve (id, motivo); el id es None si no se guardó."""
     text = normalize.blocks_to_text(extracted.blocks)
     words = normalize.count_words(text)
     if words < 30 and not extracted.is_paywalled:
         log.info("Descartado por vacío: %s", extracted.canonical_url)
-        return None
+        return None, f"llegaron casi vacíos ({words} palabras)"
 
     digest = normalize.content_hash(extracted.title, text)
     canonical = normalize.canonicalize_url(extracted.canonical_url or ref.url)
@@ -297,7 +346,7 @@ def _persist(
         )
     )
     if duplicate is not None:
-        return None
+        return None, "ya estaban guardados (mismo texto u otra dirección)"
 
     article = Article(
         columnist_id=columnist.id,
@@ -328,7 +377,7 @@ def _persist(
     except IntegrityError:
         savepoint.rollback()
         log.info("La base de datos ya tenía este artículo: %s", canonical)
-        return None
+        return None, "ya estaban guardados"
 
     log.info("Nuevo artículo: %s — %s", columnist.name, article.title)
-    return article.id
+    return article.id, "guardado"
