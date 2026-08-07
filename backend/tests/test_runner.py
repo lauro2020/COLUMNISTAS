@@ -18,7 +18,7 @@ import httpx
 import pytest
 import respx
 from sqlalchemy import create_engine, func, select, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import sessionmaker
 
 from app.collector.http_client import Fetcher
 from app.config import settings
@@ -111,10 +111,15 @@ def db():
         conexion.commit()
 
     motor = create_engine(
-        TEST_DB, connect_args={"options": "-csearch_path=prueba,public"}
+        TEST_DB, connect_args={"options": "-csearch_path=prueba"}
     )
     Base.metadata.create_all(motor)
-    sesion = Session(motor)
+    # Con los MISMOS ajustes que usa la aplicación. Importa: con autoflush
+    # (el valor por defecto de SQLAlchemy) las consultas van vaciando los
+    # cambios pendientes solas, y eso tapa los fallos en que un cambio se
+    # queda en memoria y la consulta siguiente lee datos ya viejos.
+    fabrica = sessionmaker(bind=motor, autoflush=False, expire_on_commit=False)
+    sesion = fabrica()
     try:
         yield sesion
     finally:
@@ -477,3 +482,63 @@ def test_una_direccion_puesta_a_mano_no_se_pisa(db):
     assert semilla.apply_url_fixes(db) == 0
     ficha = db.scalar(select(Columnist).where(Columnist.name == "Javier Solórzano"))
     assert ficha.source_url == "https://www.razon.com.mx/algo-que-puse-yo/"
+
+
+def test_el_arranque_completo_sobre_una_base_ya_sembrada(db):
+    """La secuencia real del contenedor sobre una base con la lista anterior.
+
+    Es la prueba que faltaba: los traslados dejaban el cambio solo en memoria
+    y la semilla, al preguntar por el medio nuevo, leía todavía el viejo,
+    respondía que faltaba e insertaba un duplicado. Al guardar, los dos
+    chocaban contra la restricción (nombre, medio) y el contenedor se quedaba
+    reiniciándose sin arrancar.
+    """
+    from app import seed as semilla
+    from app.models import Columnist
+
+    # El estado anterior: cada uno en el medio del que después se movió
+    anteriores = [
+        ("Jorge G. Castañeda", "El Financiero",
+         "https://www.elfinanciero.com.mx/opinion/jorge-castaneda/"),
+        ("María Amparo Casar", "UnoTV",
+         "https://www.unotv.com/opinion/maria-amparo-casar/"),
+        ("Javier Solórzano", "La Razón",
+         "https://www.razon.com.mx/autor/javier-solorzano-zinser/"),
+    ]
+    for nombre, medio, url in anteriores:
+        db.add(Columnist(name=nombre, outlet=medio, source_url=url))
+    db.commit()
+
+    resultado = semilla.run(db)
+
+    assert resultado["columnists_moved"] == 2
+    assert resultado["urls_fixed"] == 1
+
+    # Ni un solo columnista repetido
+    for nombre, _, _ in anteriores:
+        fichas = db.scalars(select(Columnist).where(Columnist.name == nombre)).all()
+        assert len(fichas) == 1, f"{nombre} quedó duplicado: {[f.outlet for f in fichas]}"
+
+    medios = {
+        f.name: f.outlet
+        for f in db.scalars(select(Columnist)).all()
+        if f.name in {n for n, _, _ in anteriores}
+    }
+    assert medios["Jorge G. Castañeda"] == "El Universal"
+    assert medios["María Amparo Casar"] == "Sonora Presente"
+
+
+def test_el_arranque_es_idempotente(db):
+    """Arrancar el contenedor dos veces no puede duplicar nada."""
+    from app import seed as semilla
+    from app.models import Columnist
+
+    db.add(Columnist(name="Jorge G. Castañeda", outlet="El Financiero",
+                     source_url="https://www.elfinanciero.com.mx/opinion/jorge-castaneda/"))
+    db.commit()
+
+    semilla.run(db)
+    cuantos = db.scalar(select(func.count(Columnist.id)))
+    semilla.run(db)
+
+    assert db.scalar(select(func.count(Columnist.id))) == cuantos

@@ -239,6 +239,14 @@ def apply_moves(db: Session) -> int:
         movidos += 1
         log.info("%s trasladado de %s a %s",
                  traslado["name"], traslado["desde"], traslado["hasta"])
+
+    # Obligatorio, no una precaución: la sesión de la aplicación va con
+    # autoflush=False, así que sin esto el traslado sigue solo en memoria y
+    # `seed_columnists` preguntaría a una base de datos que todavía dice el
+    # medio viejo. Respondería que falta, insertaría un segundo columnista, y
+    # al guardar chocarían los dos contra la restricción (nombre, medio).
+    if movidos:
+        db.flush()
     return movidos
 
 
@@ -281,6 +289,8 @@ def apply_url_fixes(db: Session) -> int:
         ficha.last_error = None
         corregidas += 1
         log.info("Dirección corregida de %s: %s", arreglo["name"], arreglo["nueva"])
+    if corregidas:
+        db.flush()  # ver la nota de apply_moves: la sesión no hace autoflush
     return corregidas
 
 
