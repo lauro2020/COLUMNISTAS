@@ -61,7 +61,12 @@ class ElUniversalExtractor(GenericExtractor):
                     refs[url] = ArticleRef(url=url, title=title or None)
 
         if refs:
-            return list(refs.values())[:25]
+            # El Universal tiene dos formas de página de autor:
+            # `/autores/<slug>/`, donde las columnas cuelgan de otra ruta, y
+            # `/opinion/<slug>/`, donde cuelgan de la propia. En la segunda hay
+            # que filtrar, o se cuelan las notas de la barra lateral y se le
+            # atribuyen al columnista columnas que no escribió.
+            return self._prefer_author_paths(list(refs.values()), base_url)[:25]
         return super().discover_from_html(html, base_url)
 
     def extract_from_html(self, html: str, url: str):

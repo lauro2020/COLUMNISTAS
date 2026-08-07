@@ -17,7 +17,7 @@ import os
 import httpx
 import pytest
 import respx
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session
 
 from app.collector.http_client import Fetcher
@@ -363,3 +363,79 @@ def test_una_fecha_de_la_barra_lateral_no_desplaza_a_la_columna(db):
     assert guardado.published_at.date() == dt.date(2026, 8, 6), (
         "debía ganar la fecha de la dirección, no la de la barra lateral"
     )
+
+
+# ---------------------------------------------------------------------------
+# Columnistas que se cambian de medio
+# ---------------------------------------------------------------------------
+def test_un_traslado_mueve_la_ficha_y_conserva_el_historico(db):
+    """No debe duplicarse ni perder lo ya recopilado."""
+    from app import seed as semilla
+    from app.models import Article, Columnist
+
+    viejo = Columnist(
+        name="Jorge G. Castañeda", outlet="El Financiero",
+        source_url="https://www.elfinanciero.com.mx/opinion/jorge-castaneda/",
+        extractor_key="elfinanciero", consecutive_failures=7,
+        last_error="redirige a la sección de opinión",
+    )
+    db.add(viejo)
+    db.flush()
+    db.add(Article(
+        columnist_id=viejo.id, title="Una columna vieja", author="x",
+        outlet="El Financiero", canonical_url="https://ejemplo.mx/vieja",
+        original_url="https://ejemplo.mx/vieja",
+        published_at=dt.datetime.now(dt.timezone.utc), body=[],
+        plain_text="x" * 200, content_hash="hh", word_count=100,
+        reading_minutes=1,
+    ))
+    db.flush()
+
+    assert semilla.apply_moves(db) == 1
+
+    fichas = db.scalars(
+        select(Columnist).where(Columnist.name == "Jorge G. Castañeda")
+    ).all()
+    assert len(fichas) == 1, "trasladar no debe duplicar la ficha"
+    ficha = fichas[0]
+    assert ficha.id == viejo.id, "el id se conserva, y con él su histórico"
+    assert ficha.outlet == "El Universal"
+    assert "eluniversal.com.mx" in ficha.source_url
+    assert ficha.extractor_key == "eluniversal"
+    assert ficha.consecutive_failures == 0
+    assert ficha.last_error is None
+
+    assert db.scalar(
+        select(func.count(Article.id)).where(Article.columnist_id == ficha.id)
+    ) == 1
+
+
+def test_un_traslado_ya_hecho_no_vuelve_a_aplicarse(db):
+    from app import seed as semilla
+    from app.models import Columnist
+
+    db.add(Columnist(
+        name="Jorge G. Castañeda", outlet="El Financiero",
+        source_url="https://www.elfinanciero.com.mx/opinion/jorge-castaneda/",
+    ))
+    db.flush()
+
+    assert semilla.apply_moves(db) == 1
+    assert semilla.apply_moves(db) == 0
+
+
+def test_si_ya_lo_diste_de_alta_en_el_medio_nuevo_no_se_toca_nada(db):
+    """Borrar la ficha vieja se llevaría por delante su histórico."""
+    from app import seed as semilla
+    from app.models import Columnist
+
+    db.add(Columnist(name="Jorge G. Castañeda", outlet="El Financiero",
+                     source_url="https://viejo.test/"))
+    db.add(Columnist(name="Jorge G. Castañeda", outlet="El Universal",
+                     source_url="https://nuevo.test/"))
+    db.flush()
+
+    assert semilla.apply_moves(db) == 0
+    assert db.scalar(
+        select(func.count(Columnist.id)).where(Columnist.name == "Jorge G. Castañeda")
+    ) == 2

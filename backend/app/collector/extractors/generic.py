@@ -38,6 +38,62 @@ SKIP_PATH = re.compile(
 ARTICLE_PATH = re.compile(r"/\d{4}/\d{2}/|/[a-z0-9]+(?:-[a-z0-9]+){2,}", re.IGNORECASE)
 
 
+# Una columna concreta lleva la fecha en la ruta (/2026/08/06/michoacan).
+# Una página de autor no. Es la señal más limpia para distinguirlas.
+SINGLE_ARTICLE_PATH = re.compile(r"/\d{4}/\d{1,2}/\d{1,2}/")
+
+# Cómo suelen llamar los medios a la página de un columnista
+AUTHOR_PATH = re.compile(
+    r"/(autor|autores|author|columnista|columnistas|opinion)/[a-z0-9-]{4,}/?$",
+    re.IGNORECASE,
+)
+
+
+def looks_like_single_article(url: str) -> bool:
+    """¿Esto es una columna suelta en vez de la página del autor?
+
+    Es un error fácil de cometer al copiar la dirección desde el navegador:
+    se copia la columna que uno estaba leyendo. Aceptarla sería peor que
+    rechazarla, porque de una columna cuelgan enlaces a notas de otras
+    personas y acabaríamos atribuyéndoselas al columnista.
+    """
+    return bool(SINGLE_ARTICLE_PATH.search(urlparse(url).path))
+
+
+def author_pages_in(html: str, base_url: str) -> list[str]:
+    """Las direcciones de página de autor que asoman en una página.
+
+    Sirve para responder con la dirección buena cuando alguien pega la de
+    una columna: el nombre del autor de esa columna enlaza justo ahí.
+    """
+    soup = BeautifulSoup(html or "", "lxml")
+    host = urlparse(base_url).netloc.lower().removeprefix("www.")
+    encontradas: list[str] = []
+
+    def añadir(href: str) -> None:
+        if not href or href.startswith(("#", "mailto:", "javascript:")):
+            return
+        absoluta = normalize.canonicalize_url(href, base_url)
+        if urlparse(absoluta).netloc.lower().removeprefix("www.") != host:
+            return
+        if absoluta not in encontradas:
+            encontradas.append(absoluta)
+
+    # Primero lo que el propio medio marca como autoría: es lo más fiable
+    for anchor in soup.select('[rel~="author"], [class*="author"] a, [class*="autor"] a, [class*="byline"] a'):
+        if anchor.name == "a" and anchor.get("href"):
+            añadir(anchor["href"])
+        for hijo in anchor.select("a[href]") if anchor.name != "a" else []:
+            añadir(hijo["href"])
+
+    # Y después, cualquier enlace con forma de página de autor
+    for anchor in soup.find_all("a", href=True):
+        if AUTHOR_PATH.search(urlparse(anchor["href"]).path or ""):
+            añadir(anchor["href"])
+
+    return encontradas[:8]
+
+
 def redirected_away(requested: str, final: str) -> bool:
     """¿El medio nos llevó a una página distinta de la que pedimos?
 
@@ -83,6 +139,24 @@ class GenericExtractor(BaseExtractor):
                 result = fetcher.get(source_url, use_browser=True)
             if not result.ok:
                 raise RuntimeError(result.error or "no se pudo abrir la página del autor")
+
+        # ¿Nos dieron una columna suelta en vez de la página del autor?
+        if looks_like_single_article(result.url):
+            candidatas = author_pages_in(result.text, result.url)
+            pista = (
+                "\n\nEn esa misma página, el nombre del autor apunta a:\n  · "
+                + "\n  · ".join(candidatas)
+                + "\n\nProbablemente sea una de esas."
+                if candidatas else
+                "\n\nAbre esa columna en el navegador y pulsa sobre el NOMBRE "
+                "del columnista: te llevará a su página, y esa es la dirección "
+                "que hay que poner aquí."
+            )
+            raise RuntimeError(
+                "Esta dirección es UNA columna concreta, no la página del "
+                "columnista. Si recolectáramos de aquí, guardaríamos las notas "
+                "que esta columna enlaza, que son de otras personas." + pista
+            )
 
         # Si el medio nos mandó a otra parte, lo que hay ahí NO es de este autor.
         if redirected_away(source_url, result.url):

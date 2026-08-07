@@ -73,15 +73,6 @@ SEED_COLUMNISTS: list[dict] = [
        "https://www.elfinanciero.com.mx/opinion/enrique-krauze1/",
        "irregular, mensual", extractor="elfinanciero",
        notes="Antes en Reforma y El País."),
-    _c("Jorge G. Castañeda", "El Financiero",
-       "https://www.elfinanciero.com.mx/opinion/jorge-castaneda/",
-       "semanal", extractor="elfinanciero",
-       notes=(
-           "OJO: esta URL redirige a la sección de opinión, así que la página "
-           "de autor cambió de dirección. Búscala en el medio y corrígela aquí; "
-           "mientras tanto la fuente avisará del problema en vez de recolectar "
-           "columnas ajenas."
-       )),
     _c("Macario Schettino", "El Financiero",
        "https://www.elfinanciero.com.mx/opinion/macario-schettino/",
        "lunes a viernes", extractor="elfinanciero",
@@ -100,6 +91,10 @@ SEED_COLUMNISTS: list[dict] = [
        "https://www.eluniversal.com.mx/autores/carlos-loret-de-mola/",
        "lunes a viernes", extractor="eluniversal",
        notes="Historias de Reportero."),
+    _c("Jorge G. Castañeda", "El Universal",
+       "https://www.eluniversal.com.mx/opinion/jorge-castaneda/",
+       "semanal", extractor="eluniversal",
+       notes="Dejó El Financiero: ahora publica en El Universal."),
 
     # --- Reforma (requiere suscripción) ------------------------------------
     _c("Jesús Silva-Herzog Márquez", "Reforma",
@@ -147,8 +142,9 @@ SEED_COLUMNISTS: list[dict] = [
        "lunes a viernes",
        notes=(
            "De memoria. OJO: esta URL redirige a la portada de La Razón, así que "
-           "la página de autor cambió de dirección. Búscala en el medio y "
-           "corrígela aquí."
+           "la página de autor cambió de dirección. Abre cualquier columna suya "
+           "y pulsa sobre su NOMBRE: ahí está la dirección buena. No pongas aquí "
+           "la de una columna concreta; la app la rechaza a propósito."
        )),
     _c("María Amparo Casar", "UnoTV",
        "https://www.unotv.com/opinion/maria-amparo-casar/",
@@ -176,6 +172,64 @@ SEED_COLUMNISTS: list[dict] = [
            "página en nexos.com.mx, pega la URL y activa la casilla «activa»."
        )),
 ]
+
+
+#: Columnistas que se cambiaron de medio.
+#:
+#: La semilla identifica a cada uno por (nombre, medio), así que al cambiarle
+#: el medio crearía una ficha nueva y dejaría la vieja al lado, fallando para
+#: siempre. Aquí se traslada la ficha existente: conserva su id y con él todo
+#: su histórico, que sigue siendo suyo aunque lo publicara en otro periódico.
+TRASLADOS = [
+    {
+        "name": "Jorge G. Castañeda",
+        "desde": "El Financiero",
+        "hasta": "El Universal",
+        "source_url": "https://www.eluniversal.com.mx/opinion/jorge-castaneda/",
+        "extractor_key": "eluniversal",
+        "notes": "Dejó El Financiero: ahora publica en El Universal.",
+    },
+]
+
+
+def apply_moves(db: Session) -> int:
+    movidos = 0
+    for traslado in TRASLADOS:
+        antigua = db.scalar(
+            select(Columnist)
+            .where(Columnist.name == traslado["name"])
+            .where(Columnist.outlet == traslado["desde"])
+        )
+        if antigua is None:
+            continue  # ya se trasladó, o esta instalación nunca lo tuvo
+
+        ya_existe = db.scalar(
+            select(Columnist)
+            .where(Columnist.name == traslado["name"])
+            .where(Columnist.outlet == traslado["hasta"])
+        )
+        if ya_existe is not None:
+            # Alguien lo dio de alta a mano en el medio nuevo. No se toca nada:
+            # borrar la ficha vieja se llevaría por delante su histórico.
+            log.warning(
+                "%s ya existe en %s; la ficha de %s se queda como está",
+                traslado["name"], traslado["hasta"], traslado["desde"],
+            )
+            continue
+
+        antigua.outlet = traslado["hasta"]
+        antigua.source_url = traslado["source_url"]
+        antigua.extractor_key = traslado["extractor_key"]
+        antigua.notes = traslado["notes"]
+        # La fuente es otra: lo que se sabía de la anterior ya no vale
+        antigua.feed_url = None
+        antigua.consecutive_failures = 0
+        antigua.last_error = None
+        antigua.active = True
+        movidos += 1
+        log.info("%s trasladado de %s a %s",
+                 traslado["name"], traslado["desde"], traslado["hasta"])
+    return movidos
 
 
 def seed_columnists(db: Session) -> int:
@@ -215,8 +269,16 @@ def seed_preferences(db: Session) -> bool:
 
 
 def run(db: Session) -> dict:
+    # Los traslados van primero: así, cuando la semilla busque al columnista
+    # en su medio nuevo, ya lo encuentra y no crea un duplicado.
+    moved = apply_moves(db)
     created = seed_columnists(db)
     prefs = seed_preferences(db)
     db.commit()
-    log.info("Semilla aplicada: %s columnistas nuevos, preferencias=%s", created, prefs)
-    return {"columnists_created": created, "preferences_created": prefs}
+    log.info("Semilla aplicada: %s columnistas nuevos, %s trasladados, preferencias=%s",
+             created, moved, prefs)
+    return {
+        "columnists_created": created,
+        "columnists_moved": moved,
+        "preferences_created": prefs,
+    }

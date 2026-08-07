@@ -741,6 +741,8 @@ docker compose exec api python -m app.cli check-sources
 | Una fuente en rojo | El medio cambió su web. Prueba `test-source <id>`; si el genérico tampoco saca nada, hará falta ajustar el extractor. |
 | Un columnista que sí bajaba y de pronto se quedó atrás | `python -m app.cli why "<parte del nombre>"`. Reproduce en vivo la recolección y da el veredicto de cada enlace de su página: ya guardado, demasiado viejo, o el motivo exacto por el que no se pudo extraer. |
 | Una columna reciente aparece fechada meses atrás | La fecha se leyó de la barra lateral de la página, no del artículo. Ya no debería pasar (manda la fecha de la dirección), pero lo ya guardado se arregla con `python -m app.cli fix-dates --apply`. |
+| `Esta dirección es UNA columna concreta, no la página del columnista` | Se copió la columna que estabas leyendo en vez de la página del autor. El propio error te ofrece las direcciones de autor que encontró en esa página; si no, abre la columna y pulsa sobre el **nombre** del columnista. |
+| Un columnista se cambió de medio | Cámbiale el **medio** y la **dirección** en Ajustes › Columnistas › Editar. Su histórico se conserva: va atado a su ficha, no al periódico. |
 | Textos truncados o "de pago" | Faltan las cookies de tu suscripción, o caducaron. Ver [Medios de pago](#medios-de-pago). |
 | El audio dice "falló" | Casi siempre es la clave de OpenAI (ausente, sin saldo o con el límite alcanzado). El error completo se ve al abrir el artículo. |
 | El audio no suena en el teléfono | Descarga el día primero si estás sin conexión; y comprueba que la app va por HTTPS. |

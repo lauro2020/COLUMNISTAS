@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
+import respx
+
+from app.collector.http_client import Fetcher
+from app.config import settings
 
 from app.collector.extractors.elfinanciero import ElFinancieroExtractor
 from app.collector.extractors.eluniversal import ElUniversalExtractor
@@ -10,6 +15,14 @@ from app.collector.extractors.generic import GenericExtractor
 from app.collector.extractors.reforma import ReformaExtractor
 from app.collector.extractors.registry import extractor_keys, get_extractor
 from tests import fixtures
+
+
+@pytest.fixture(autouse=True)
+def sin_esperas(monkeypatch):
+    monkeypatch.setattr(settings, "request_delay_seconds", 0.0)
+    monkeypatch.setattr(settings, "respect_robots", False)
+    monkeypatch.setattr(settings, "max_retries", 1)
+    monkeypatch.setattr(Fetcher, "_backoff", staticmethod(lambda attempt: None))
 
 
 # ---------------------------------------------------------------------------
@@ -307,3 +320,82 @@ def test_elfinanciero_encuentra_columnas_por_ruta_canonica():
     assert len(refs) == 2, "solo sus dos columnas"
     assert all("raymundo-riva-palacio" in u for u in urls)
     assert not any("otro-autor" in u for u in urls)
+
+
+# ---------------------------------------------------------------------------
+# Una columna suelta no es la página del autor
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("url,es_columna", [
+    ("https://www.razon.com.mx/opinion/2026/08/06/michoacan/", True),
+    ("https://www.elfinanciero.com.mx/opinion/quien/2026/08/06/titular/", True),
+    ("https://www.razon.com.mx/autor/javier-solorzano-zinser/", False),
+    ("https://www.eluniversal.com.mx/opinion/jorge-castaneda/", False),
+    ("https://www.elfinanciero.com.mx/opinion/macario-schettino/", False),
+])
+def test_se_distingue_una_columna_de_la_pagina_del_autor(url, es_columna):
+    from app.collector.extractors.generic import looks_like_single_article
+
+    assert looks_like_single_article(url) is es_columna
+
+
+def test_de_una_columna_se_saca_la_pagina_de_su_autor():
+    """Al pegar la dirección de una columna, poder responder con la buena."""
+    from app.collector.extractors.generic import author_pages_in
+
+    html = """
+    <html><body>
+      <article>
+        <span class="byline"><a href="/autor/javier-solorzano/">Javier Solórzano</a></span>
+        <p>El cuerpo de la columna.</p>
+        <a href="/opinion/2026/08/05/otra-columna/">Otra columna</a>
+        <a href="https://twitter.com/alguien">Twitter</a>
+      </article>
+    </body></html>
+    """
+    encontradas = author_pages_in(html, "https://www.razon.com.mx/opinion/2026/08/06/michoacan/")
+
+    # canonicalize_url quita el «www.»
+    assert "https://razon.com.mx/autor/javier-solorzano" in encontradas
+    assert not any("twitter" in u for u in encontradas)
+
+
+@respx.mock
+def test_pegar_una_columna_en_vez_de_la_pagina_del_autor_se_rechaza():
+    """Aceptarla sería peor: colgarían de ahí notas de otras personas."""
+    from app.collector.extractors.generic import GenericExtractor
+
+    url = "https://www.razon.com.mx/opinion/2026/08/06/michoacan/"
+    respx.get(url).mock(return_value=httpx.Response(200, text="""
+        <html><body><article>
+          <span class="byline"><a href="/autor/javier-solorzano/">Javier Solórzano</a></span>
+          <a href="/opinion/2026/08/05/nota-de-otro-autor/">Nota de otro</a>
+        </article></body></html>
+    """))
+
+    with Fetcher() as fetcher, pytest.raises(RuntimeError) as fallo:
+        GenericExtractor().discover(url, fetcher)
+
+    mensaje = str(fallo.value)
+    assert "UNA columna concreta" in mensaje
+    assert "/autor/javier-solorzano" in mensaje, "debe ofrecer la dirección buena"
+
+
+def test_el_universal_no_mezcla_columnas_de_otros_autores():
+    """En /opinion/<autor>/ las columnas cuelgan de esa misma ruta."""
+    from app.collector.extractors.eluniversal import ElUniversalExtractor
+
+    base = "https://www.eluniversal.com.mx/opinion/jorge-castaneda/"
+    html = """
+    <html><body>
+      <article><h2><a href="/opinion/jorge-castaneda/la-columna-de-hoy/">La columna de hoy</a></h2></article>
+      <article><h2><a href="/opinion/jorge-castaneda/la-columna-de-ayer/">La columna de ayer</a></h2></article>
+      <aside><h3><a href="/opinion/otro-columnista/lo-que-escribio-otro/">Lo que escribió otro</a></h3></aside>
+      <div class="card"><a href="/nacion/una-noticia-cualquiera/">Una noticia</a></div>
+    </body></html>
+    """
+
+    refs = ElUniversalExtractor().discover_from_html(html, base)
+
+    rutas = [r.url for r in refs]
+    assert all("/opinion/jorge-castaneda/" in u for u in rutas), rutas
+    assert len(rutas) == 2
