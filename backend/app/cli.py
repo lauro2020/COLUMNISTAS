@@ -137,6 +137,21 @@ def cmd_status(_: argparse.Namespace) -> int:
             print(f"Última recolección: {last.started_at:%Y-%m-%d %H:%M} UTC "
                   f"— {last.status.value}, {last.articles_new} nuevos, "
                   f"{last.sources_failed}/{last.sources_total} con error")
+
+        # El historial importa: un día sin línea aquí es un día en que la
+        # recolección no llegó a ejecutarse (la computadora estuvo apagada, o
+        # los contenedores parados), y eso explica de golpe a varios
+        # columnistas que "se quedaron atrás".
+        recientes = db.scalars(
+            select(CollectionRun).order_by(CollectionRun.started_at.desc()).limit(10)
+        ).all()
+        if len(recientes) > 1:
+            print("\nÚltimas recolecciones (si falta un día, ese día no se ejecutó):")
+            for r in recientes:
+                print(f"  {r.started_at:%d/%m %H:%M} UTC  {r.trigger:<9} "
+                      f"{r.status.value:<8} {r.articles_new:>3} nuevos  "
+                      f"{r.sources_failed}/{r.sources_total} con error")
+
         print("\nFuentes:")
         for c in columnists:
             estado = "✓" if c.consecutive_failures == 0 else f"✗ x{c.consecutive_failures}"
