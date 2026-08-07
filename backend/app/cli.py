@@ -330,16 +330,33 @@ def cmd_fix_dates(args: argparse.Namespace) -> int:
     with session_scope() as db:
         articulos = db.scalars(select(Article).order_by(Article.id)).all()
         cambios = []
+        sin_fecha_en_la_url = 0
         for art in articulos:
             de_url = fechas.from_url(art.canonical_url) or fechas.from_url(art.original_url)
-            if de_url is None or art.published_at is None:
+            if de_url is None:
+                # Su dirección no lleva fecha, así que no hay con qué comparar
+                sin_fecha_en_la_url += 1
+                continue
+            if art.published_at is None:
                 continue
             if abs(fechas.ensure_aware(art.published_at) - de_url) <= TOLERANCIA_DE_FECHA:
                 continue
             cambios.append((art, fechas.ensure_aware(art.published_at), de_url))
 
+        # Decir siempre qué se pudo mirar: «ninguna que corregir» significa
+        # cosas muy distintas si resulta que casi ninguna dirección traía fecha.
+        comprobables = len(articulos) - sin_fecha_en_la_url
+        print(f"\nArtículos: {len(articulos)}   "
+              f"con fecha en su dirección: {comprobables}   "
+              f"sin ella (no comprobables): {sin_fecha_en_la_url}")
+
         if not cambios:
-            print("\n✓ Ninguna fecha que corregir: todas concuerdan con su dirección.\n")
+            if comprobables:
+                print("\n✓ Las que se pudieron comprobar concuerdan con su dirección.\n")
+            else:
+                print("\n~ Ninguna dirección lleva fecha dentro, así que no hay nada")
+                print("  con qué comparar. Si una columna aparece mal fechada, mírala")
+                print("  con:   python -m app.cli why \"<parte del nombre>\"\n")
             return 0
 
         print(f"\n{len(cambios)} artículo(s) con la fecha equivocada:\n")
@@ -440,16 +457,24 @@ def cmd_why(args: argparse.Namespace) -> int:
                 select(Article)
                 .where(Article.columnist_id == columnist.id)
                 .order_by(Article.published_at.desc())
-                .limit(5)
+                .limit(8)
             ).all()
         )
         total = db.scalar(
             select(func.count(Article.id)).where(Article.columnist_id == columnist.id)
         ) or 0
-        print(f"\n  Ya guardados: {total}")
+        print(f"\n  Ya guardados: {total}   (los 8 más recientes)")
         for art in guardados:
             fecha = art.published_at.strftime("%d/%m/%Y") if art.published_at else "sin fecha"
-            print(f"    {fecha}  {art.title[:56]}")
+            # Si la dirección dice otra cosa, la fecha guardada es sospechosa:
+            # es justo el fallo que hunde una columna de ayer al fondo de la lista.
+            de_url = fechas.from_url(art.canonical_url) or fechas.from_url(art.original_url)
+            aviso = ""
+            if de_url and art.published_at and abs(
+                fechas.ensure_aware(art.published_at) - de_url
+            ) > dt.timedelta(days=2):
+                aviso = f"   ← su dirección dice {de_url:%d/%m/%Y}"
+            print(f"    {fecha}  {art.title[:56]}{aviso}")
         if not guardados:
             print("    (ninguno todavía)")
 
@@ -507,6 +532,12 @@ def cmd_why(args: argparse.Namespace) -> int:
             candidatos = []
             for ref in refs[: args.limit]:
                 ref.url = normalize.canonicalize_url(ref.url)
+                # Igual que hace la recolección: si la página del autor no trae
+                # la fecha en el enlace, se saca de la dirección. Sin esto la
+                # lista salía entera «sin fecha» y no se podía ver de un vistazo
+                # si falta la columna de ayer o no.
+                if ref.published_at is None:
+                    ref.published_at = fechas.from_url(ref.url)
                 fecha = fechas.ensure_aware(ref.published_at) if ref.published_at else None
                 etiqueta = fecha.strftime("%d/%m/%Y") if fecha else "sin fecha"
                 # Muchas páginas de autor no traen el titular en el enlace; en
