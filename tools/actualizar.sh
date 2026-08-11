@@ -13,6 +13,34 @@ set -u
 
 cd "$(dirname "$0")/.." || exit 1
 
+# --- Antes que nada: ¿está Docker en marcha? --------------------------------
+# Sin esto, el fallo aparece más adelante disfrazado de error de descarga de
+# imágenes, y el mensaje que sigue habla de reconstrucciones cuando lo único
+# que hace falta es abrir una aplicación.
+echo
+echo "── 0. ¿Está Docker en marcha? ────────────────────"
+
+if ! command -v docker >/dev/null 2>&1; then
+    echo "  ✗ Docker no está instalado, o no está en el PATH."
+    echo "    Descárgalo de https://www.docker.com/products/docker-desktop/"
+    exit 1
+fi
+
+if ! docker info >/dev/null 2>&1; then
+    echo "  ✗ Docker Desktop no está corriendo."
+    echo
+    echo "    Ábrelo (Aplicaciones › Docker) y espera a que el icono de la"
+    echo "    ballena, arriba en la barra de menús, deje de moverse."
+    echo "    Después vuelve a ejecutar este comando."
+    echo
+    echo "    Mientras Docker esté cerrado NO hay nada corriendo: ni la app,"
+    echo "    ni la recolección de las 6 de la mañana. Es también lo que hay"
+    echo "    detrás de un «no se puede conectar con el servidor» en la web."
+    exit 1
+fi
+
+echo "  ✓ Docker está en marcha."
+
 echo
 echo "── 1. Traer los cambios ──────────────────────────"
 
@@ -39,9 +67,16 @@ echo
 
 if ! docker compose up -d --build; then
     echo
-    echo "  ✗ La reconstrucción falló. Los contenedores siguen corriendo la"
-    echo "    versión ANTERIOR: la app no se ha roto, pero tampoco se ha"
-    echo "    actualizado. Mándame las últimas líneas de aquí arriba."
+    echo "  ✗ La reconstrucción falló."
+    # Docker pudo pararse a mitad. Solo se puede decir «sigue corriendo lo
+    # anterior» si de verdad hay algo corriendo.
+    if docker compose ps --status running 2>/dev/null | grep -q .; then
+        echo "    Lo que ya estaba en pie sigue funcionando con la versión"
+        echo "    anterior: la app no se ha roto, pero tampoco se ha actualizado."
+    else
+        echo "    Y no hay ningún contenedor en pie, así que la app está parada."
+    fi
+    echo "    Mándame las últimas líneas de aquí arriba."
     exit 1
 fi
 
