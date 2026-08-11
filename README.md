@@ -744,6 +744,9 @@ docker compose exec api python -m app.cli check-sources
 | `403 … aun identificándonos como navegador` | El sitio (Milenio, por ejemplo) filtra por algo más que el User-Agent. Activa el navegador headless: ver más abajo. |
 | Reforma dice `redirigió a su pantalla de acceso` | No reconoció tu sesión. Guarda las cookies en **Ajustes › Credenciales** con el medio escrito exactamente `Reforma`. Si ya estaban, caducaron: vuelve a copiarlas. |
 | `No address associated with hostname` | Es DNS, no scraping: el contenedor no logra traducir el dominio a una dirección. Corre `doctor`. La configuración ya fuerza DNS de Cloudflare y Google, porque el resolutor interno de Docker Desktop falla con algunos periódicos. Si sigue, prueba `docker compose restart` y reinicia Docker Desktop. |
+| `Failed to fetch` (versiones anteriores) | El navegador no llegó a hablar con el servidor. Hoy la app lo dice con todas sus letras y explica qué ejecutar. Casi siempre: los contenedores no están arriba. `sh tools/actualizar.sh`. |
+| «No se puede conectar con el servidor de la app» | Los contenedores no están en pie. `sh tools/actualizar.sh` los levanta y, si algo falla, enseña el registro. |
+| «La página carga pero el servicio que guarda los artículos no responde» | nginx está bien y `api` no. `docker compose logs --tail 40 api`: el motivo está en las últimas líneas. |
 | No aparece ninguna columna | Pestaña **Fuentes**: ahí se ve el error exacto de cada medio. |
 | Un columnista dice «Sin artículos recientes» | Su última columna recopilada tiene más de 15 días. La leyenda dice cuánto hace; su histórico completo sigue disponible en la pestaña **históricos** de su fila. |
 | Una fuente en rojo | El medio cambió su web. Prueba `test-source <id>`; si el genérico tampoco saca nada, hará falta ajustar el extractor. |

@@ -24,6 +24,17 @@ export class ApiError extends Error {
   }
 }
 
+/** No se llegó a hablar con el servidor. */
+export const SIN_SERVIDOR =
+  'No se puede conectar con el servidor de la app. En la computadora donde ' +
+  'corre, ejecuta «sh tools/actualizar.sh»; si estás en el teléfono, ' +
+  'comprueba además que esa computadora esté encendida y en el mismo WiFi.'
+
+/** Se habló con el servidor web, pero la parte que guarda los datos no está. */
+export const API_CAIDA =
+  'La página carga pero el servicio que guarda los artículos no responde. ' +
+  'En la computadora donde corre la app:  docker compose logs --tail 40 api'
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken()
   const headers: Record<string, string> = {
@@ -33,7 +44,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (options.body) headers['Content-Type'] = 'application/json'
   if (token) headers.Authorization = `Bearer ${token}`
 
-  const response = await fetch(path, { ...options, headers })
+  let response: Response
+  try {
+    response = await fetch(path, { ...options, headers })
+  } catch {
+    // `fetch` solo lanza cuando NO llegó a haber respuesta: nadie escuchando,
+    // el servidor caído, o sin red. El navegador dice «Failed to fetch», que
+    // no ayuda a nadie; aquí se dice qué hacer.
+    throw new ApiError(0, SIN_SERVIDOR)
+  }
 
   // Un 401 al entrar significa "contraseña incorrecta", no "sesión caducada":
   // ahí todavía no hay sesión que caducar. Se deja pasar para que el mensaje
@@ -44,6 +63,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     setToken(null)
     window.dispatchEvent(new CustomEvent('columnistas:logout'))
     throw new ApiError(401, 'La sesión caducó. Vuelve a entrar con tu contraseña.')
+  }
+  // 502/503/504 los devuelve nginx cuando el contenedor «api» no está en pie.
+  // No traen JSON, así que sin esto se veía un escueto «Error 502».
+  if (response.status === 502 || response.status === 503 || response.status === 504) {
+    throw new ApiError(response.status, API_CAIDA)
   }
   if (!response.ok) {
     let detail = `Error ${response.status}`
