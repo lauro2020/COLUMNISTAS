@@ -174,6 +174,25 @@ termine, abre en el navegador:
 
 Entra con la contraseña que pusiste en `APP_PASSWORD`.
 
+#### Cambiarla más adelante
+
+```bash
+sh tools/cambiar-contrasena.sh
+```
+
+Te la pide dos veces (sin que se vea), la rechaza si lleva algo que el `.env`
+malinterpretaría —`#`, `$`, comillas, espacios—, la escribe guardando antes
+una copia del archivo, recrea los contenedores y **entra en la app con ella**
+para confirmar que sirve. Si prefieres hacerlo a mano, edita `APP_PASSWORD` en
+el `.env` y ejecuta `docker compose up -d`; `docker compose restart` no vale,
+porque los contenedores solo leen ese archivo al crearse.
+
+> Cambiar la contraseña **no cierra las sesiones abiertas**: la sesión se firma
+> con `APP_SECRET_KEY`, no con la contraseña. Los aparatos donde ya habías
+> entrado siguen dentro. Para echar a todos, cambia también `APP_SECRET_KEY`.
+> Ojo: eso además invalida las credenciales de medios guardadas, porque están
+> cifradas con esa misma llave; habrá que volver a guardarlas.
+
 ### 4. Comprueba que todo arrancó
 
 ```bash
@@ -740,6 +759,7 @@ docker compose exec api python -m app.cli check-sources
 
 | Síntoma | Qué mirar |
 |---|---|
+| Quieres cambiar la contraseña | `sh tools/cambiar-contrasena.sh`: la escribe, recrea los contenedores y comprueba entrando en la app con ella. |
 | Cambiaste `APP_PASSWORD` y sigue sin dejarte entrar | `docker compose restart` **no** vuelve a leer el `.env`. Hace falta `docker compose up -d`, que recrea los contenedores con los valores nuevos. |
 | No te deja entrar con tu contraseña | `docker compose exec api python -m app.cli check-password`: te dice si la que tecleas coincide con la que tiene el contenedor, sin mostrarla. Ojo con `#` y `$` en el `.env`: el primero convierte en comentario todo lo que le sigue, y el segundo lo interpreta Docker como una variable. |
 | Al construir: `Package 'ttf-ubuntu-font-family' has no installation candidate` | Playwright intentaba instalar paquetes de Ubuntu sobre Debian. Ya está corregido: la imagen base está fijada a Debian 12 y las bibliotecas se instalan por nombre. Si lo ves, haz `git pull` y vuelve a construir. |
