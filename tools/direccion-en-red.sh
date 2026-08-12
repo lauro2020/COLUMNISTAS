@@ -256,6 +256,10 @@ else
         echo "  delante, en la barra del navegador:"
         echo
         echo "      http://$PRIMERA:$PUERTO"
+        echo
+        echo "  Esta es LA TUYA, la de esta computadora en esta red. Cualquier"
+        echo "  otra que hayas visto en la documentación es solo un ejemplo, y"
+        echo "  en tu red no existe."
     fi
 fi
 echo "══════════════════════════════════════════════════════"

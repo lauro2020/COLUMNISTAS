@@ -288,9 +288,12 @@ al final te da la dirección:
 
 ── 5. Dirección para el teléfono ─────────────────
 
-      http://192.168.1.42:8080
+      http://192.168.1.42:8080      ← EJEMPLO. La tuya es otra.
   ✓ responde
 ```
+
+> **No copies la dirección de este ejemplo.** Cada red da la suya, y en la
+> tuya esa no existe. Usa la que imprima el comando **en tu computadora**.
 
 Lo que salga con **✗** es lo que hay que arreglar, y el propio comando dice
 cómo. En el teléfono, **conectado al mismo WiFi**, escribe la dirección
