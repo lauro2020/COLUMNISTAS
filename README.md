@@ -264,6 +264,22 @@ docker compose exec api python -m app.cli version
 Imprime cuándo se construyó la imagen que está corriendo y qué comandos
 reconoce. Si falta uno que esperabas, la reconstrucción no se aplicó.
 
+### Que arranque solo al encender la computadora
+
+La app vive dentro de Docker, así que **con Docker Desktop cerrado no corre
+nada**: ni la web ni la recolección de las 06:00. Es la causa más frecuente de
+«no se puede conectar con el servidor», y pasa sin avisar cada vez que
+reinicias la Mac.
+
+Se arregla una vez y para siempre:
+
+**Docker Desktop → ⚙ Settings → General → «Start Docker Desktop when you sign
+in to your computer»** (marcada).
+
+Los contenedores llevan `restart: unless-stopped`, así que en cuanto Docker
+arranca vuelven solos. Sin esa casilla hay que abrir Docker a mano después de
+cada reinicio.
+
 ### Cuánto cuesta el audio con esta lista
 
 Con unas 15 columnas nuevas al día y la voz de OpenAI, ronda los **0.20 USD
