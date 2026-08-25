@@ -628,6 +628,22 @@ ffmpeg, de modo que una columna larga no tarda mucho más que una corta.
 
 ## Ejecutar cada pieza por separado
 
+> **Atajo, y una trampa que evita.** `docker compose` busca su archivo de
+> configuración **en la carpeta donde estás**, así que estos comandos solo
+> funcionan desde la carpeta del proyecto; desde otra fallan con
+> `no configuration file provided: not found`, que en ningún momento dice que
+> el problema sea la carpeta. Para no depender de eso:
+>
+> ```bash
+> sh ~/columnistas/tools/app.sh status
+> sh ~/columnistas/tools/app.sh why "riva palacio"
+> ```
+>
+> Funciona desde donde estés, comprueba antes que Docker esté abierto, y sin
+> argumentos lista los comandos disponibles. Todo lo de abajo se puede escribir
+> igual con `tools/app.sh <comando>` en vez de
+> `docker compose exec api python -m app.cli <comando>`.
+
 Los tres componentes son independientes. Con Docker corriendo:
 
 ```bash
@@ -783,6 +799,7 @@ docker compose exec api python -m app.cli check-sources
 | `403 … aun identificándonos como navegador` | El sitio (Milenio, por ejemplo) filtra por algo más que el User-Agent. Activa el navegador headless: ver más abajo. |
 | Reforma dice `redirigió a su pantalla de acceso` | No reconoció tu sesión. Guarda las cookies en **Ajustes › Credenciales** con el medio escrito exactamente `Reforma`. Si ya estaban, caducaron: vuelve a copiarlas. |
 | `No address associated with hostname` | Es DNS, no scraping: el contenedor no logra traducir el dominio a una dirección. Corre `doctor`. La configuración ya fuerza DNS de Cloudflare y Google, porque el resolutor interno de Docker Desktop falla con algunos periódicos. Si sigue, prueba `docker compose restart` y reinicia Docker Desktop. |
+| `no configuration file provided: not found` | No estás en la carpeta del proyecto: `docker compose` busca su configuración donde estés. `cd ~/columnistas` y repite, o usa `sh ~/columnistas/tools/app.sh <comando>`, que funciona desde cualquier sitio. |
 | `Cannot connect to the Docker daemon` | Docker Desktop está cerrado. Ábrelo y espera a que la ballena de la barra de menús deje de moverse. Con Docker cerrado no corre nada: ni la app ni la recolección de las 06:00. |
 | `Failed to fetch` (versiones anteriores) | El navegador no llegó a hablar con el servidor. Hoy la app lo dice con todas sus letras y explica qué ejecutar. Casi siempre: los contenedores no están arriba. `sh tools/actualizar.sh`. |
 | «No se puede conectar con el servidor de la app» | Los contenedores no están en pie. `sh tools/actualizar.sh` los levanta y, si algo falla, enseña el registro. |
