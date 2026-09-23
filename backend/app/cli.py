@@ -14,6 +14,8 @@ Cada componente se puede ejecutar y probar por separado:
     python -m app.cli check-sources           # prueba TODAS las fuentes
     python -m app.cli why "riva palacio"      # ¿por qué no llega nada de éste?
     python -m app.cli fix-dates               # corrige fechas mal leídas
+    python -m app.cli pause                   # deja de recolectar
+    python -m app.cli pause --reanudar        # vuelve a recolectar
     python -m app.cli test-source 3           # prueba una fuente sin guardar
     python -m app.cli download-piper-voice es_MX-ald-medium
 """
@@ -165,6 +167,38 @@ def cmd_version(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pause(args: argparse.Namespace) -> int:
+    """Para o reanuda toda la actividad automática.
+
+    En pausa no se recolecta, no se genera audio y no se borra nada por
+    retención. Lo ya guardado se sigue leyendo y escuchando igual.
+    """
+    from app.tasks import _prefs
+
+    with session_scope() as db:
+        prefs = _prefs(db)
+        prefs.collection_paused = not args.reanudar
+
+    if args.reanudar:
+        print("\n▶ Recolección reanudada.")
+        print("  Volverá a buscar sola a la hora configurada. Para no esperar:")
+        print("    python -m app.cli collect\n")
+    else:
+        print("\n⏸ Recolección en pausa.")
+        print("  No entrará nada nuevo, no se generará audio y no se borrará")
+        print("  nada por retención. Todo lo ya recopilado se sigue leyendo y")
+        print("  escuchando con normalidad.")
+        print("\n  Para reanudar:   python -m app.cli pause --reanudar")
+        print("  (o desde la app, en Ajustes › Recolección diaria)\n")
+    return 0
+
+
+def _prefs_actuales(db):
+    from app.models import UserPreference
+
+    return db.get(UserPreference, 1)
+
+
 def cmd_status(_: argparse.Namespace) -> int:
     from app.models import Article, Audio, AudioStatus, CollectionRun, Columnist
 
@@ -176,6 +210,10 @@ def cmd_status(_: argparse.Namespace) -> int:
         total = db.scalar(select(func.count(Article.id))) or 0
         ready = db.scalar(select(func.count(Audio.id)).where(Audio.status == AudioStatus.ready)) or 0
         last = db.scalar(select(CollectionRun).order_by(CollectionRun.started_at.desc()).limit(1))
+
+        if getattr(_prefs_actuales(db), "collection_paused", False):
+            print("\n⏸ LA RECOLECCIÓN ESTÁ EN PAUSA. No entrará nada nuevo")
+            print("  hasta que la reanudes:   python -m app.cli pause --reanudar")
 
         print(f"\nArtículos: {total}   Audios listos: {ready}")
         if last:
@@ -913,6 +951,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_check.add_argument("--all", action="store_true",
                          help="incluir también las fuentes desactivadas")
     p_check.set_defaults(func=cmd_check_sources)
+
+    p_pause = sub.add_parser(
+        "pause", help="pausa (o reanuda) la recolección automática")
+    p_pause.add_argument("--reanudar", action="store_true",
+                         help="volver a activarla")
+    p_pause.set_defaults(func=cmd_pause)
 
     p_fix = sub.add_parser(
         "fix-dates", help="corrige fechas mal leídas usando la dirección del artículo")

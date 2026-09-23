@@ -16,6 +16,7 @@ const DEFAULT_PREFS: Preferences = {
   auto_generate_audio: true,
   playback_rate: 1,
   retention_months: 12,
+  collection_paused: false,
   theme: 'system',
   font_size: 18,
 }

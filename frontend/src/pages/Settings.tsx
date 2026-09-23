@@ -112,7 +112,42 @@ export function Settings() {
     <Layout title="Ajustes">
       {/* ---------------------------------------------------------------- */}
       <div className="section-title">Recolección diaria</div>
+
+      {prefs.collection_paused && (
+        <div className="card aviso-pausa">
+          <strong>La recolección está en pausa.</strong>
+          <div className="faint" style={{ marginTop: '.3rem' }}>
+            No entra nada nuevo, no se genera audio y no se borra nada por
+            retención. Todo lo ya recopilado se sigue leyendo y escuchando.
+          </div>
+          <button
+            className="btn primary small"
+            style={{ marginTop: '.7rem' }}
+            onClick={() => savePrefs({ collection_paused: false })}
+          >
+            Reanudar la recolección
+          </button>
+        </div>
+      )}
+
       <div className="card">
+        {!prefs.collection_paused && (
+          <label className="row" style={{ cursor: 'pointer', marginBottom: '.8rem' }}>
+            <input
+              type="checkbox"
+              checked={prefs.collection_paused}
+              onChange={(e) => savePrefs({ collection_paused: e.target.checked })}
+            />
+            <span>
+              Pausar la recolección
+              <span className="hint" style={{ display: 'block' }}>
+                Deja de traer columnas nuevas hasta que lo desactives. Lo ya
+                guardado no se toca.
+              </span>
+            </span>
+          </label>
+        )}
+
         <div className="row">
           <div className="field" style={{ flex: 1, minWidth: '6rem' }}>
             <label htmlFor="hour">Hora</label>

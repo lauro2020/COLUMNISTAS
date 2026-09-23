@@ -741,3 +741,11 @@ input[type='range']:focus { outline: none; }
 }
 
 .col-lista .play-inline { width: 24px; height: 24px; font-size: .62rem; }
+
+
+/* Aviso de pausa: tiene que verse sin buscarlo, porque si no la lista
+   congelada se confunde con la app rota. */
+.aviso-pausa {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--line));
+  box-shadow: inset 3px 0 0 var(--warn);
+}

@@ -291,6 +291,15 @@ class UserPreference(Base):
     playback_rate: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     retention_months: Mapped[int] = mapped_column(Integer, default=12, nullable=False)
 
+    # Pausa general: deja de recolectar, de generar audio y de borrar por
+    # retención. Lo ya guardado se sigue leyendo y escuchando con normalidad.
+    # Va en la base de datos, no en un contenedor parado, para que sobreviva a
+    # reinicios y reconstrucciones: parar contenedores lo desharía el próximo
+    # «docker compose up -d» sin decir nada.
+    collection_paused: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false"
+    )
+
     theme: Mapped[str] = mapped_column(String(20), default="system")  # light | dark | system
     font_size: Mapped[int] = mapped_column(Integer, default=18)
 

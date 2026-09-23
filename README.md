@@ -264,6 +264,29 @@ docker compose exec api python -m app.cli version
 Imprime cuándo se construyó la imagen que está corriendo y qué comandos
 reconoce. Si falta uno que esperabas, la reconstrucción no se aplicó.
 
+### Pausar la app sin apagarla
+
+En **Ajustes › Recolección diaria**, la casilla **«Pausar la recolección»** deja
+la app en modo lectura: no entran columnas nuevas, no se genera audio y no se
+borra nada por retención. Todo lo ya recopilado se sigue leyendo y escuchando
+igual. Mientras está en pausa, la pantalla de inicio lo avisa con un recuadro,
+para que una lista que no avanza no se confunda con una avería.
+
+Desde la línea de órdenes:
+
+```bash
+sh tools/app.sh pause              # pausar
+sh tools/app.sh pause --reanudar   # volver a recolectar
+```
+
+La pausa vive en la base de datos, no en un contenedor apagado a propósito.
+Es deliberado: parar contenedores lo desharía el siguiente
+`docker compose up -d` sin decir nada, y la app volvería a recolectar sin que
+nadie lo hubiera pedido.
+
+> El botón **↻ Buscar ahora** sigue funcionando en pausa: es una petición
+> explícita tuya, no actividad automática.
+
 ### Que arranque solo al encender la computadora
 
 La app vive dentro de Docker, así que **con Docker Desktop cerrado no corre

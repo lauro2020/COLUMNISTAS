@@ -47,18 +47,33 @@ pytestmark = pytest.mark.skipif(
 
 # ---------------------------------------------------------------------------
 # Páginas de mentira: una columna normal, una recortada por muro de pago
+#
+# Las fechas van SIEMPRE relativas a hoy. La recolección descarta lo que pasa
+# de MAX_AGE_DAYS y saca la fecha de la propia dirección, así que unas fechas
+# clavadas en el calendario harían que estas pruebas se cayeran solas al cabo
+# de unas semanas, sin que nadie hubiera tocado nada.
 # ---------------------------------------------------------------------------
-PAGINA_DEL_AUTOR = """
+def _ruta(dias_atras: int, slug: str) -> str:
+    """La dirección de una columna publicada hace N días."""
+    dia = dt.date.today() - dt.timedelta(days=dias_atras)
+    return f"https://diario.test/opinion/quien/{dia:%Y/%m/%d}/{slug}"
+
+
+URL_NUEVA = _ruta(0, "la-nueva")
+URL_RECORTADA = _ruta(1, "la-recortada")
+URL_ASOMADA = _ruta(2, "la-asomada")
+URL_DE_HOY = _ruta(0, "la-de-hoy")
+PAGINA_DEL_AUTOR = f"""
 <html><body><main>
-  <article><h2><a href="https://diario.test/opinion/quien/2026/08/06/la-nueva/">La nueva</a></h2></article>
-  <article><h2><a href="https://diario.test/opinion/quien/2026/08/05/la-recortada/">La recortada</a></h2></article>
+  <article><h2><a href="{URL_NUEVA}/">La nueva</a></h2></article>
+  <article><h2><a href="{URL_RECORTADA}/">La recortada</a></h2></article>
 </main></body></html>
 """
 
-COLUMNA_COMPLETA = """
+COLUMNA_COMPLETA = f"""
 <html><head><title>La nueva</title>
 <meta property="og:title" content="La nueva">
-<link rel="canonical" href="https://diario.test/opinion/quien/2026/08/06/la-nueva/">
+<link rel="canonical" href="{URL_NUEVA}/">
 </head><body><article><h1>La nueva</h1><div class="cuerpo-nota">
 <p>Primer parrafo con suficiente texto como para que el limpiador de bloques
    no lo tire, hablando de la reforma que discute el Congreso esta semana.</p>
@@ -71,20 +86,20 @@ COLUMNA_COMPLETA = """
 
 # Dos párrafos, pero cortísimos: pasa el filtro de bloques y cae en el de
 # palabras. Es la forma en que algunos medios sirven la columna al no suscriptor.
-COLUMNA_ASOMADA = """
+COLUMNA_ASOMADA = f"""
 <html><head><title>La asomada</title>
 <meta property="og:title" content="La asomada">
-<link rel="canonical" href="https://diario.test/opinion/quien/2026/08/04/la-asomada/">
+<link rel="canonical" href="{URL_ASOMADA}/">
 </head><body><article><h1>La asomada</h1><div class="cuerpo-nota">
 <p>El arranque de la columna, cortado por el medio.</p>
 <p>Nada mas por aqui.</p>
 </div></article></body></html>
 """
 
-COLUMNA_RECORTADA = """
+COLUMNA_RECORTADA = f"""
 <html><head><title>La recortada</title>
 <meta property="og:title" content="La recortada">
-<link rel="canonical" href="https://diario.test/opinion/quien/2026/08/05/la-recortada/">
+<link rel="canonical" href="{URL_RECORTADA}/">
 </head><body><article><h1>La recortada</h1><div class="cuerpo-nota">
 <p>Solo el arranque.</p>
 </div></article></body></html>
@@ -146,10 +161,10 @@ def _rutas():
     respx.get("https://diario.test/opinion/quien/").mock(
         return_value=httpx.Response(200, text=PAGINA_DEL_AUTOR)
     )
-    respx.get("https://diario.test/opinion/quien/2026/08/06/la-nueva").mock(
+    respx.get(URL_NUEVA).mock(
         return_value=httpx.Response(200, text=COLUMNA_COMPLETA)
     )
-    respx.get("https://diario.test/opinion/quien/2026/08/05/la-recortada").mock(
+    respx.get(URL_RECORTADA).mock(
         return_value=httpx.Response(200, text=COLUMNA_RECORTADA)
     )
 
@@ -218,12 +233,10 @@ def test_una_pagina_que_no_deja_extraer_lo_dice(db):
     respx.get("https://diario.test/opinion/quien/").mock(
         return_value=httpx.Response(
             200,
-            text=PAGINA_DEL_AUTOR.replace(
-                "2026/08/06/la-nueva/", "2026/08/05/la-recortada/"
-            ),
+            text=PAGINA_DEL_AUTOR.replace(URL_NUEVA, URL_RECORTADA),
         )
     )
-    respx.get("https://diario.test/opinion/quien/2026/08/05/la-recortada").mock(
+    respx.get(URL_RECORTADA).mock(
         return_value=httpx.Response(200, text=COLUMNA_RECORTADA)
     )
     columnista = _columnista(db)
@@ -250,12 +263,10 @@ def test_una_columna_asomada_se_guarda_marcada_de_pago(db):
     respx.get("https://diario.test/opinion/quien/").mock(
         return_value=httpx.Response(
             200,
-            text=PAGINA_DEL_AUTOR.replace(
-                "2026/08/06/la-nueva/", "2026/08/04/la-asomada/"
-            ).replace("2026/08/05/la-recortada/", "2026/08/04/la-asomada/"),
+            text=PAGINA_DEL_AUTOR.replace(URL_NUEVA, URL_ASOMADA).replace(URL_RECORTADA, URL_ASOMADA),
         )
     )
-    respx.get("https://diario.test/opinion/quien/2026/08/04/la-asomada").mock(
+    respx.get(URL_ASOMADA).mock(
         return_value=httpx.Response(200, text=COLUMNA_ASOMADA)
     )
     columnista = _columnista(db)
@@ -319,10 +330,10 @@ def test_no_se_traen_columnas_mas_viejas_que_el_limite(db):
 # ---------------------------------------------------------------------------
 # La fecha que va dentro de la dirección
 # ---------------------------------------------------------------------------
-COLUMNA_CON_FECHA_AJENA = """
+COLUMNA_CON_FECHA_AJENA = f"""
 <html><head><title>La de hoy</title>
 <meta property="og:title" content="La de hoy">
-<link rel="canonical" href="https://diario.test/opinion/quien/2026/08/06/la-de-hoy/">
+<link rel="canonical" href="{URL_DE_HOY}/">
 </head><body>
   <aside>Lo mas leido: una nota vieja del 3 de febrero de 2026</aside>
   <article><h1>La de hoy</h1><div class="cuerpo-nota">
@@ -350,13 +361,13 @@ def test_una_fecha_de_la_barra_lateral_no_desplaza_a_la_columna(db):
     respx.get("https://diario.test/opinion/quien/").mock(
         return_value=httpx.Response(
             200,
-            text=PAGINA_DEL_AUTOR.replace("2026/08/06/la-nueva/", "2026/08/06/la-de-hoy/"),
+            text=PAGINA_DEL_AUTOR.replace(URL_NUEVA, URL_DE_HOY),
         )
     )
-    respx.get("https://diario.test/opinion/quien/2026/08/06/la-de-hoy").mock(
+    respx.get(URL_DE_HOY).mock(
         return_value=httpx.Response(200, text=COLUMNA_CON_FECHA_AJENA)
     )
-    respx.get("https://diario.test/opinion/quien/2026/08/05/la-recortada").mock(
+    respx.get(URL_RECORTADA).mock(
         return_value=httpx.Response(200, text=COLUMNA_RECORTADA)
     )
     columnista = _columnista(db)
@@ -365,7 +376,7 @@ def test_una_fecha_de_la_barra_lateral_no_desplaza_a_la_columna(db):
 
     guardado = db.scalar(select(Article).where(Article.title == "La de hoy"))
     assert guardado is not None
-    assert guardado.published_at.date() == dt.date(2026, 8, 6), (
+    assert guardado.published_at.date() == dt.date.today(), (
         "debía ganar la fecha de la dirección, no la de la barra lateral"
     )
 
@@ -542,3 +553,56 @@ def test_el_arranque_es_idempotente(db):
     semilla.run(db)
 
     assert db.scalar(select(func.count(Columnist.id))) == cuantos
+
+
+# ---------------------------------------------------------------------------
+# Pausa general
+# ---------------------------------------------------------------------------
+def test_en_pausa_no_se_dispara_nada(db, monkeypatch):
+    """El «tick» es el único sitio del que arranca todo lo automático."""
+    from app import tasks
+
+    prefs = tasks._prefs(db)
+    prefs.collection_paused = True
+    prefs.collect_hour, prefs.collect_minute = 0, 0   # la hora ya pasó
+    db.commit()
+
+    lanzados = []
+    monkeypatch.setattr(tasks.collect, "delay",
+                        lambda **kw: lanzados.append(("collect", kw)))
+    monkeypatch.setattr(tasks.apply_retention, "delay",
+                        lambda: lanzados.append(("retention", {})))
+    monkeypatch.setattr(tasks, "session_scope", _sesion_fija(db))
+
+    assert tasks.tick() == "en pausa"
+    assert lanzados == [], "en pausa no debe lanzarse ninguna tarea"
+
+
+def test_al_reanudar_vuelve_a_recolectar(db, monkeypatch):
+    from app import tasks
+
+    prefs = tasks._prefs(db)
+    prefs.collection_paused = False
+    prefs.collect_hour, prefs.collect_minute = 0, 0
+    db.commit()
+
+    lanzados = []
+    monkeypatch.setattr(tasks.collect, "delay",
+                        lambda **kw: lanzados.append(("collect", kw)))
+    monkeypatch.setattr(tasks.apply_retention, "delay",
+                        lambda: lanzados.append(("retention", {})))
+    monkeypatch.setattr(tasks, "session_scope", _sesion_fija(db))
+
+    assert tasks.tick() == "recolección lanzada"
+    assert [n for n, _ in lanzados] == ["collect", "retention"]
+
+
+def _sesion_fija(db):
+    """session_scope de mentira que reutiliza la sesión de la prueba."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def fabrica():
+        yield db
+
+    return fabrica

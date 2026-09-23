@@ -163,6 +163,9 @@ class OverviewResponse(BaseModel):
     with_recent: int
     published_today: int
     last_run_at: dt.datetime | None = None
+    #: si está en pausa hay que decirlo en la pantalla de inicio: si no, la
+    #: lista se ve congelada y no hay manera de saber por qué
+    collection_paused: bool = False
     columnists: list[ColumnistOverview] = []
 
 
@@ -186,6 +189,7 @@ class PreferencesOut(ORMModel):
     auto_generate_audio: bool
     playback_rate: float
     retention_months: int
+    collection_paused: bool
     theme: str
     font_size: int
 
@@ -199,6 +203,7 @@ class PreferencesUpdate(BaseModel):
     auto_generate_audio: bool | None = None
     playback_rate: float | None = Field(default=None, ge=0.5, le=3.0)
     retention_months: int | None = Field(default=None, ge=0, le=120)
+    collection_paused: bool | None = None
     theme: str | None = None
     font_size: int | None = Field(default=None, ge=12, le=32)
 

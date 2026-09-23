@@ -114,6 +114,7 @@ export interface Overview {
   with_recent: number
   published_today: number
   last_run_at: string | null
+  collection_paused: boolean
   columnists: ColumnistOverview[]
 }
 
@@ -126,6 +127,7 @@ export interface Preferences {
   auto_generate_audio: boolean
   playback_rate: number
   retention_months: number
+  collection_paused: boolean
   theme: 'light' | 'dark' | 'system'
   font_size: number
 }

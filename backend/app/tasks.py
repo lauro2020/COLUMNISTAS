@@ -77,6 +77,14 @@ def tick() -> str:
     """Decide si ya toca recolectar hoy. Se ejecuta cada 5 minutos."""
     with session_scope() as db:
         prefs = _prefs(db)
+
+        # Pausa general. Aquí arriba del todo a propósito: este `tick` es el
+        # único sitio desde el que arrancan la recolección, la generación de
+        # audio y el borrado por retención, así que cortando aquí no queda
+        # ningún proceso suelto tocando nada.
+        if prefs.collection_paused:
+            return "en pausa"
+
         try:
             tz = ZoneInfo(prefs.timezone or settings.timezone)
         except Exception:  # noqa: BLE001

@@ -97,6 +97,16 @@ export function Inbox() {
 
   return (
     <Layout title="Columnistas">
+      {data.collection_paused && (
+        <div className="card aviso-pausa">
+          <strong>⏸ Recolección en pausa</strong>
+          <div className="faint" style={{ marginTop: '.3rem' }}>
+            No entran columnas nuevas. Lo que ves aquí sigue completo y se
+            puede leer y escuchar. Se reanuda en Ajustes › Recolección diaria.
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <div className="spread">
           <div>

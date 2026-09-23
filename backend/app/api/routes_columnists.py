@@ -16,7 +16,7 @@ from app.api.deps import current_user, get_db
 from app.collector import normalize, rss
 from app.collector.extractors.registry import extractor_keys, get_extractor
 from app.collector.http_client import Fetcher
-from app.models import Article, CollectionRun, Columnist
+from app.models import Article, CollectionRun, Columnist, UserPreference
 from app.schemas import (
     ColumnistCreate,
     ColumnistOut,
@@ -196,6 +196,7 @@ def overview(
         with_recent=sum(1 for f in filas if f.latest is not None),
         published_today=sum(1 for f in filas if f.published_today),
         last_run_at=db.scalar(select(func.max(CollectionRun.finished_at))),
+        collection_paused=bool(getattr(db.get(UserPreference, 1), "collection_paused", False)),
         columnists=filas,
     )
 
