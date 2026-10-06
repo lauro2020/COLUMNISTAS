@@ -44,7 +44,7 @@ Conéctate (`ssh root@IP`) y corre:
 ```bash
 curl -fsSL https://get.docker.com | sh
 ufw allow 22 && ufw allow 80 && ufw allow 443 && ufw --force enable
-git clone -b claude/columnistas-pwa-app-p3ezj6 https://github.com/lauro2020/COLUMNISTAS.git columnistas
+git clone -b claude/exciting-carson-wl6a0s https://github.com/lauro2020/COLUMNISTAS.git columnistas
 cd columnistas
 sh tools/preparar-servidor.sh
 ```
