@@ -761,6 +761,9 @@ El frontend se comprueba con `cd frontend && npm run typecheck`.
 
 ## Desplegar en un servidor
 
+> Guía completa, con servidor recomendado, dominio, HTTPS y contraseña:
+> [docs/publicar-en-internet.md](docs/publicar-en-internet.md).
+
 Para que la recolección de las 06:00 ocurra de verdad sin que enciendas nada,
 la app tiene que vivir en una máquina encendida 24/7. Un servidor de 5–10 USD
 al mes sobra.

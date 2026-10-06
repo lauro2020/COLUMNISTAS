@@ -1,0 +1,35 @@
+# Capa de producción: se SUMA a docker-compose.yml, no lo reemplaza.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# En el servidor no hace falta escribir eso: tools/preparar-servidor.sh deja
+# COMPOSE_FILE en el .env y basta con «docker compose up -d --build».
+#
+# Qué cambia respecto a tu computadora:
+#   - Caddy pone HTTPS delante (obtiene y renueva el certificado solo).
+#   - La web ya NO se publica en el puerto 8080: solo se llega por Caddy.
+#     Así nadie puede entrar por http:// sin cifrar saltándose el candado.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+    environment:
+      DOMAIN: ${DOMAIN:?Falta DOMAIN en el .env (ej. columnistas.duckdns.org)}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+
+  web:
+    # Quita la publicación del puerto 8080 definida en el compose base.
+    ports: !reset []
+
+volumes:
+  caddydata:
+  caddyconfig:
