@@ -173,6 +173,7 @@ def collect_one(
     apuntes = notas if notas is not None else []
     cookies = cookies_for_outlet(db, columnist.outlet)
     extractor = get_extractor(columnist.source_url, columnist.extractor_key)
+    extractor.author_hint = columnist.name
 
     with Fetcher(
         cookies=cookies, browser_identity=columnist.browser_identity

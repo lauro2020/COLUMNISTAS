@@ -17,6 +17,8 @@ Se usan únicamente para leer contenido al que ya tienes derecho.
 from __future__ import annotations
 
 import re
+import unicodedata
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -32,6 +34,33 @@ ARTICLE_RE = re.compile(r"/(?:ar|op)\d{5,}", re.IGNORECASE)
 # Cuando no reconoce una sesión de suscriptor, Reforma redirige a su pantalla
 # de acceso. Detectarlo permite decir qué pasa en vez de "no encontré nada".
 LOGIN_PATH_RE = re.compile(r"/libre/acceso/|/acceso/|accesofb", re.IGNORECASE)
+
+#: Páginas de Reforma que reúnen columnas de MUCHOS autores («Hoy opinan»).
+#: En ellas hay que quedarse solo con las del columnista que se recolecta: si
+#: no, se guardarían las de todos con el nombre de uno.
+SECTION_PATHS = {"/editoriales", "/opinion"}
+
+
+def _normalizar(texto: str) -> str:
+    """Minúsculas, sin acentos ni signos: «Silva-Herzog» -> «silva herzog»."""
+    sin_acentos = "".join(
+        c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c)
+    )
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", sin_acentos.lower()).split())
+
+
+def _clave_de_nombre(nombre: str) -> str:
+    """Nombre y primer apellido: «Carlos Elizondo Mayer-Serra» -> «carlos elizondo».
+
+    Reforma firma a veces con el apellido completo y a veces abreviado, así
+    que se compara solo el comienzo.
+    """
+    return " ".join(_normalizar(nombre).split()[:2])
+
+
+def es_pagina_de_seccion(url: str) -> bool:
+    return urlparse(url or "").path.rstrip("/").lower() in SECTION_PATHS
+
 
 LOGIN_MESSAGE = (
     "Reforma redirigió a su pantalla de acceso: no reconoció una sesión de "
@@ -99,9 +128,54 @@ class ReformaExtractor(GenericExtractor):
             if url not in refs or (title and not refs[url].title):
                 refs[url] = ArticleRef(url=url, title=title or None)
 
+        if refs and self.author_hint and es_pagina_de_seccion(base_url):
+            refs = self._solo_del_autor(soup, refs, base_url)
+
         if refs:
             return list(refs.values())[:25]
+        if self.author_hint and es_pagina_de_seccion(base_url):
+            # Hoy no firma nada: no se recurre al genérico, que devolvería
+            # enlaces de otros autores.
+            return []
         return super().discover_from_html(html, base_url)
+
+    def _solo_del_autor(self, soup, refs: dict, base_url: str) -> dict:
+        """Deja los artículos cuya «tarjeta» nombra al columnista.
+
+        En la página de sección cada columna es una tarjeta (foto, firma,
+        título, extracto). La firma no es un enlace aparte: está en la misma
+        tarjeta que el enlace al artículo. Para cada artículo se sube desde
+        su enlace hasta el contenedor más grande que aún contenga UN solo
+        artículo; ese es su texto, y ahí tiene que aparecer el columnista.
+        """
+        clave = _clave_de_nombre(self.author_hint or "")
+        if not clave:
+            return refs
+
+        def ruta(href: str) -> str:
+            return normalize.canonicalize_url(href, base_url)
+
+        propios: dict = {}
+        for anchor in soup.find_all("a", href=True):
+            if not ARTICLE_RE.search(anchor["href"]):
+                continue
+            url = ruta(anchor["href"].strip())
+            if url not in refs:
+                continue
+            tarjeta = anchor
+            while tarjeta.parent is not None and tarjeta.parent.name not in ("body", "html", "[document]"):
+                padre = tarjeta.parent
+                distintos = {
+                    ruta(a["href"].strip())
+                    for a in padre.find_all("a", href=True)
+                    if ARTICLE_RE.search(a["href"])
+                }
+                if len(distintos) > 1:
+                    break
+                tarjeta = padre
+            if clave in _normalizar(tarjeta.get_text(" ", strip=True)):
+                propios[url] = refs[url]
+        return propios
 
     def extract_from_html(self, html: str, url: str) -> ExtractedArticle | None:
         soup = BeautifulSoup(html, "lxml")

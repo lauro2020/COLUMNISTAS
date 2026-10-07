@@ -414,3 +414,69 @@ def test_reforma_reconoce_las_columnas_de_opinion_op():
         "/lula-y-bolsonaro-2026-10-06/op322086",
         "/culpar-a-las-redes-2026-10-05/op322002",
     }
+
+
+# --- Reforma: página de sección «Hoy opinan» (varios autores) ---------------
+
+HOY_OPINAN = """
+<h2>HOY OPINAN</h2>
+<div class="fila">
+  <div class="tarjeta">
+    <a href="/templo-mayor-2026-10-06/op322080"><img src="a.jpg"></a>
+    <span class="firma">F. BARTOLOMÉ</span>
+    <a href="/templo-mayor-2026-10-06/op322080">Templo Mayor</a>
+    <p>SE VIVEN tiempos opacos</p>
+  </div>
+  <div class="tarjeta">
+    <a href="/lula-y-bolsonaro-2026-10-06/op322086"><img src="b.jpg"></a>
+    <span class="firma">SERGIO SARMIENTO</span>
+    <a href="/lula-y-bolsonaro-2026-10-06/op322086">Lula y Bolsonaro</a>
+    <p>El resultado de la segunda vuelta</p>
+  </div>
+  <div class="tarjeta">
+    <a href="/silva-herzog-2026-10-06/op322090"><img src="c.jpg"></a>
+    <span class="firma">JESÚS SILVA-HERZOG MÁRQUEZ</span>
+    <a href="/silva-herzog-2026-10-06/op322090">La república</a>
+  </div>
+  <div class="tarjeta">
+    <a href="/elizondo-2026-10-06/op322091"><img src="d.jpg"></a>
+    <span class="firma">CARLOS ELIZONDO</span>
+    <a href="/elizondo-2026-10-06/op322091">Un país</a>
+  </div>
+</div>
+"""
+SECCION = "https://www.reforma.com/editoriales/"
+
+
+def _reforma(nombre, html=HOY_OPINAN, base=SECCION):
+    ext = ReformaExtractor()
+    ext.author_hint = nombre
+    return ext.discover_from_html(html, base)
+
+
+def _rutas(refs):
+    return sorted(r.url.split("reforma.com", 1)[1] for r in refs)
+
+
+def test_seccion_de_reforma_deja_solo_las_columnas_del_columnista():
+    assert _rutas(_reforma("Sergio Sarmiento")) == ["/lula-y-bolsonaro-2026-10-06/op322086"]
+
+
+def test_seccion_de_reforma_compara_sin_acentos_ni_guiones():
+    assert _rutas(_reforma("Jesús Silva-Herzog Márquez")) == ["/silva-herzog-2026-10-06/op322090"]
+
+
+def test_seccion_de_reforma_acepta_apellido_abreviado_en_la_firma():
+    """La firma dice «CARLOS ELIZONDO»; la ficha, «Carlos Elizondo Mayer-Serra»."""
+    assert _rutas(_reforma("Carlos Elizondo Mayer-Serra")) == ["/elizondo-2026-10-06/op322091"]
+
+
+def test_seccion_de_reforma_sin_columna_hoy_no_atribuye_las_de_otros():
+    """Denise Dresser no firma hoy: debe salir vacío, no la lista entera."""
+    assert _reforma("Denise Dresser") == []
+
+
+def test_pagina_de_autor_no_se_filtra_por_nombre():
+    """Si la fuente es una página propia del autor, no hay firma que comparar."""
+    refs = _reforma("Sergio Sarmiento", base="https://www.reforma.com/jaque-mate/")
+    assert len(refs) == 4

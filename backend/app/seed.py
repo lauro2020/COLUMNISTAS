@@ -98,19 +98,19 @@ SEED_COLUMNISTS: list[dict] = [
 
     # --- Reforma (requiere suscripción) ------------------------------------
     _c("Jesús Silva-Herzog Márquez", "Reforma",
-       "https://www.reforma.com/jesus-silva-herzog-marquez/",
+       "https://www.reforma.com/editoriales/",
        "lunes", extractor="reforma", source_type=SourceType.html,
        notes="Requiere suscripción: guarda las cookies en Ajustes › Credenciales."),
     _c("Denise Dresser", "Reforma",
-       "https://www.reforma.com/denise-dresser/",
+       "https://www.reforma.com/editoriales/",
        "lunes", extractor="reforma", source_type=SourceType.html,
        notes="Columna política semanal. Requiere suscripción."),
     _c("Carlos Elizondo Mayer-Serra", "Reforma",
-       "https://www.reforma.com/carlos-elizondo-mayer-serra/",
+       "https://www.reforma.com/editoriales/",
        "domingos", extractor="reforma", source_type=SourceType.html,
        notes="Página editorial. Requiere suscripción."),
     _c("Sergio Sarmiento", "Reforma",
-       "https://www.reforma.com/sergio-sarmiento/",
+       "https://www.reforma.com/editoriales/",
        "lunes a viernes", extractor="reforma", source_type=SourceType.html,
        notes="Jaque Mate. Sindicada en más de 20 diarios. Requiere suscripción."),
 
@@ -262,6 +262,34 @@ CORRECCIONES_DE_URL = [
         "vieja": "https://www.razon.com.mx/autor/javier-solorzano-zinser/",
         "nueva": "https://www.razon.com.mx/autores/javier-solorzano-zinser/",
         "notes": "De memoria. La Razón usa «/autores/» en plural.",
+    },
+    {
+        "name": "Jesús Silva-Herzog Márquez",
+        "outlet": "Reforma",
+        "vieja": "https://www.reforma.com/jesus-silva-herzog-marquez/",
+        "nueva": "https://www.reforma.com/editoriales/",
+        "notes": "Se lee de «Hoy opinan» (/editoriales/), filtrando por firma. Requiere suscripción.",
+    },
+    {
+        "name": "Denise Dresser",
+        "outlet": "Reforma",
+        "vieja": "https://www.reforma.com/denise-dresser/",
+        "nueva": "https://www.reforma.com/editoriales/",
+        "notes": "Se lee de «Hoy opinan» (/editoriales/), filtrando por firma. Requiere suscripción.",
+    },
+    {
+        "name": "Carlos Elizondo Mayer-Serra",
+        "outlet": "Reforma",
+        "vieja": "https://www.reforma.com/carlos-elizondo-mayer-serra/",
+        "nueva": "https://www.reforma.com/editoriales/",
+        "notes": "Se lee de «Hoy opinan» (/editoriales/), filtrando por firma. Requiere suscripción.",
+    },
+    {
+        "name": "Sergio Sarmiento",
+        "outlet": "Reforma",
+        "vieja": "https://www.reforma.com/sergio-sarmiento/",
+        "nueva": "https://www.reforma.com/editoriales/",
+        "notes": "Se lee de «Hoy opinan» (/editoriales/), filtrando por firma. Requiere suscripción.",
     },
 ]
 

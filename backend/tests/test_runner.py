@@ -606,3 +606,25 @@ def _sesion_fija(db):
         yield db
 
     return fabrica
+
+
+def test_los_cuatro_de_reforma_pasan_a_la_pagina_de_opinion(db):
+    """Las direcciones de autor de Reforma nunca existieron (404): se corrigen."""
+    from app import seed as semilla
+    from app.models import Columnist
+
+    nombres = {
+        "Sergio Sarmiento": "sergio-sarmiento",
+        "Denise Dresser": "denise-dresser",
+    }
+    for nombre, slug in nombres.items():
+        db.add(Columnist(
+            name=nombre, outlet="Reforma",
+            source_url=f"https://www.reforma.com/{slug}/",
+        ))
+    db.flush()
+
+    assert semilla.apply_url_fixes(db) == 2
+    for nombre in nombres:
+        ficha = db.scalar(select(Columnist).where(Columnist.name == nombre))
+        assert "/editoriales" in ficha.source_url

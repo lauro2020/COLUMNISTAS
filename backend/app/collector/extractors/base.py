@@ -57,6 +57,10 @@ class BaseExtractor:
     needs_browser: bool = False
     #: nombre legible del medio
     outlet: str | None = None
+    #: nombre del columnista que se está recolectando. Lo pone el runner antes
+    #: de descubrir; lo usan los extractores cuya página lista a varios autores
+    #: y necesitan quedarse solo con los de este.
+    author_hint: str | None = None
 
     @classmethod
     def matches(cls, url: str) -> bool:
