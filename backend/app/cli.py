@@ -278,7 +278,12 @@ def cmd_test_source(args: argparse.Namespace) -> int:
                     print(f"  párrafos: {len(article.blocks)}  "
                           f"muro de pago: {article.is_paywalled}")
                     if article.blocks:
+                        from app.collector import normalize
+
+                        texto = normalize.blocks_to_text(article.blocks)
+                        print(f"  palabras: {normalize.count_words(texto)}")
                         print(f"  inicio: {article.blocks[0]['text'][:200]}…")
+                        print(f"  final:  …{article.blocks[-1]['text'][-200:]}")
     return 0
 
 
