@@ -259,6 +259,7 @@ def cmd_test_source(args: argparse.Namespace) -> int:
             return 1
         cookies = cookies_for_outlet(db, columnist.outlet)
         extractor = get_extractor(columnist.source_url, columnist.extractor_key)
+        extractor.author_hint = columnist.name
         print(f"Fuente: {columnist.name} ({columnist.outlet})")
         print(f"Extractor: {extractor.key}")
         if columnist.browser_identity:
@@ -518,6 +519,7 @@ def cmd_why(args: argparse.Namespace) -> int:
 
         cookies = cookies_for_outlet(db, columnist.outlet)
         extractor = get_extractor(columnist.source_url, columnist.extractor_key)
+        extractor.author_hint = columnist.name
         es_primera_vez = total == 0
         tope = MAX_ARTICLES_FIRST_RUN if es_primera_vez else MAX_ARTICLES_PER_SOURCE
 
@@ -859,6 +861,7 @@ def cmd_check_sources(args: argparse.Namespace) -> int:
 
     for cid, name, outlet, source_url, feed_url, extractor_key, browser, cookies in fuentes:
         extractor = get_extractor(source_url, extractor_key)
+        extractor.author_hint = name
         try:
             with Fetcher(cookies=cookies, browser_identity=browser) as fetcher:
                 if feed_url:
