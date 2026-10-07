@@ -43,3 +43,16 @@ def test_una_diferencia_pequena_no_toca_la_fecha_de_la_pagina():
     url = "https://diario.test/opinion/quien/2026/08/07/la-de-hoy"
 
     assert _mejor_fecha(leida, url) == leida
+
+
+@pytest.mark.parametrize("url, esperado", [
+    ("https://www.reforma.com/lula-y-bolsonaro-2026-10-06/op322086", (2026, 10, 6)),
+    ("https://www.reforma.com/culpar-a-las-redes-2026-10-05/op322002", (2026, 10, 5)),
+])
+def test_reforma_pega_la_fecha_al_final_del_titulo(url, esperado):
+    """Direcciones reales de columnas de Reforma: «titulo-AAAA-MM-DD/opNNNNNN»."""
+    from app.collector import dates
+
+    fecha = dates.from_url(url)
+    assert fecha is not None
+    assert (fecha.year, fecha.month, fecha.day) == esperado

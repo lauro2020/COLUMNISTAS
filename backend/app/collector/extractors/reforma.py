@@ -24,8 +24,10 @@ from app.collector import dates, normalize
 from app.collector.extractors.base import ArticleRef, ExtractedArticle
 from app.collector.extractors.generic import GenericExtractor
 
-# Reforma usa URLs tipo /titulo-de-la-columna/ar1234567
-ARTICLE_RE = re.compile(r"/ar\d{5,}", re.IGNORECASE)
+# Reforma usa dos formas de dirección de artículo:
+#   /titulo-de-la-nota/ar1234567                 (notas)
+#   /titulo-de-la-columna-2026-10-06/op322086    (columnas de opinión)
+ARTICLE_RE = re.compile(r"/(?:ar|op)\d{5,}", re.IGNORECASE)
 
 # Cuando no reconoce una sesión de suscriptor, Reforma redirige a su pantalla
 # de acceso. Detectarlo permite decir qué pasa en vez de "no encontré nada".

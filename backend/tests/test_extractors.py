@@ -399,3 +399,18 @@ def test_el_universal_no_mezcla_columnas_de_otros_autores():
     rutas = [r.url for r in refs]
     assert all("/opinion/jorge-castaneda/" in u for u in rutas), rutas
     assert len(rutas) == 2
+
+
+def test_reforma_reconoce_las_columnas_de_opinion_op():
+    """Las columnas de opinión de Reforma terminan en /opNNNNNN, no en /arNNNNNNN."""
+    html = (
+        '<a href="/lula-y-bolsonaro-2026-10-06/op322086">Lula y Bolsonaro</a>'
+        '<a href="/culpar-a-las-redes-2026-10-05/op322002">Culpar a las redes</a>'
+        '<a href="/seccion/opinion">Opinión</a>'
+    )
+    refs = ReformaExtractor().discover_from_html(html, "https://www.reforma.com/autor/")
+    # canonicalize_url quita el «www.»; lo que importa es la ruta
+    assert {r.url.split("reforma.com", 1)[1] for r in refs} == {
+        "/lula-y-bolsonaro-2026-10-06/op322086",
+        "/culpar-a-las-redes-2026-10-05/op322002",
+    }

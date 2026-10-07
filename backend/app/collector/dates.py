@@ -98,8 +98,9 @@ def _from_jsonld(soup: BeautifulSoup) -> dt.datetime | None:
     return None
 
 
-#: /2026/08/06/ y /2026-08-06/ dentro de la dirección del artículo
-URL_DATE = re.compile(r"/(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:/|-|$)")
+#: /2026/08/06/, /2026-08-06/ y «titulo-2026-08-06/» dentro de la dirección
+#: del artículo (Reforma pega la fecha al final del título, tras un guion).
+URL_DATE = re.compile(r"[/-](\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:/|-|$)")
 
 
 def from_url(url: str | None) -> dt.datetime | None:
