@@ -1,0 +1,630 @@
+"""Pruebas del recolector completo, contra una base de datos de verdad.
+
+Lo que se comprueba aquí es la parte que decide **qué entra y qué no**, y
+sobre todo que cuando no entra nada quede escrito el motivo: un día sin
+columna nueva y un extractor roto se veían igual en la pantalla de Fuentes,
+y eso hacía imposible saber a cuál de los dos se estaba uno enfrentando.
+
+Necesita PostgreSQL (los modelos usan JSONB y tipos ENUM propios). Si no
+hay ninguno a mano, las pruebas se saltan solas.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import os
+
+import httpx
+import pytest
+import respx
+from sqlalchemy import create_engine, func, select, text
+from sqlalchemy.orm import sessionmaker
+
+from app.collector.http_client import Fetcher
+from app.config import settings
+
+TEST_DB = os.environ.get(
+    "TEST_DATABASE_URL",
+    "postgresql+psycopg://postgres@/postgres?host=/tmp&port=5433",
+)
+
+
+def _hay_base_de_datos() -> bool:
+    try:
+        motor = create_engine(TEST_DB, pool_pre_ping=True)
+        with motor.connect() as conexion:
+            conexion.execute(text("select 1"))
+        motor.dispose()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _hay_base_de_datos(), reason="no hay PostgreSQL para probar"
+)
+
+
+# ---------------------------------------------------------------------------
+# Páginas de mentira: una columna normal, una recortada por muro de pago
+#
+# Las fechas van SIEMPRE relativas a hoy. La recolección descarta lo que pasa
+# de MAX_AGE_DAYS y saca la fecha de la propia dirección, así que unas fechas
+# clavadas en el calendario harían que estas pruebas se cayeran solas al cabo
+# de unas semanas, sin que nadie hubiera tocado nada.
+# ---------------------------------------------------------------------------
+def _ruta(dias_atras: int, slug: str) -> str:
+    """La dirección de una columna publicada hace N días."""
+    dia = dt.date.today() - dt.timedelta(days=dias_atras)
+    return f"https://diario.test/opinion/quien/{dia:%Y/%m/%d}/{slug}"
+
+
+URL_NUEVA = _ruta(0, "la-nueva")
+URL_RECORTADA = _ruta(1, "la-recortada")
+URL_ASOMADA = _ruta(2, "la-asomada")
+URL_DE_HOY = _ruta(0, "la-de-hoy")
+PAGINA_DEL_AUTOR = f"""
+<html><body><main>
+  <article><h2><a href="{URL_NUEVA}/">La nueva</a></h2></article>
+  <article><h2><a href="{URL_RECORTADA}/">La recortada</a></h2></article>
+</main></body></html>
+"""
+
+COLUMNA_COMPLETA = f"""
+<html><head><title>La nueva</title>
+<meta property="og:title" content="La nueva">
+<link rel="canonical" href="{URL_NUEVA}/">
+</head><body><article><h1>La nueva</h1><div class="cuerpo-nota">
+<p>Primer parrafo con suficiente texto como para que el limpiador de bloques
+   no lo tire, hablando de la reforma que discute el Congreso esta semana.</p>
+<p>Segundo parrafo que insiste en el asunto y aporta cifras concretas, de modo
+   que el conteo de palabras supere con holgura el minimo exigido.</p>
+<p>Tercer parrafo de cierre, tambien largo, para que no queden dudas de que
+   esta columna se extrajo entera y debe guardarse sin ningun problema.</p>
+</div></article></body></html>
+"""
+
+# Dos párrafos, pero cortísimos: pasa el filtro de bloques y cae en el de
+# palabras. Es la forma en que algunos medios sirven la columna al no suscriptor.
+COLUMNA_ASOMADA = f"""
+<html><head><title>La asomada</title>
+<meta property="og:title" content="La asomada">
+<link rel="canonical" href="{URL_ASOMADA}/">
+</head><body><article><h1>La asomada</h1><div class="cuerpo-nota">
+<p>El arranque de la columna, cortado por el medio.</p>
+<p>Nada mas por aqui.</p>
+</div></article></body></html>
+"""
+
+COLUMNA_RECORTADA = f"""
+<html><head><title>La recortada</title>
+<meta property="og:title" content="La recortada">
+<link rel="canonical" href="{URL_RECORTADA}/">
+</head><body><article><h1>La recortada</h1><div class="cuerpo-nota">
+<p>Solo el arranque.</p>
+</div></article></body></html>
+"""
+
+
+@pytest.fixture(autouse=True)
+def sin_esperas(monkeypatch):
+    monkeypatch.setattr(settings, "request_delay_seconds", 0.0)
+    monkeypatch.setattr(settings, "respect_robots", False)
+    monkeypatch.setattr(settings, "max_retries", 1)
+    monkeypatch.setattr(Fetcher, "_backoff", staticmethod(lambda attempt: None))
+
+
+@pytest.fixture
+def db():
+    """Un esquema limpio y desechable por prueba."""
+    from app.models import Base
+
+    motor = create_engine(TEST_DB)
+    with motor.connect() as conexion:
+        conexion.execute(text("drop schema if exists prueba cascade"))
+        conexion.execute(text("create schema prueba"))
+        conexion.commit()
+
+    motor = create_engine(
+        TEST_DB, connect_args={"options": "-csearch_path=prueba"}
+    )
+    Base.metadata.create_all(motor)
+    # Con los MISMOS ajustes que usa la aplicación. Importa: con autoflush
+    # (el valor por defecto de SQLAlchemy) las consultas van vaciando los
+    # cambios pendientes solas, y eso tapa los fallos en que un cambio se
+    # queda en memoria y la consulta siguiente lee datos ya viejos.
+    fabrica = sessionmaker(bind=motor, autoflush=False, expire_on_commit=False)
+    sesion = fabrica()
+    try:
+        yield sesion
+    finally:
+        sesion.close()
+        motor.dispose()
+
+
+def _columnista(db):
+    from app.models import Columnist, SourceType
+
+    c = Columnist(
+        name="Quien Sea",
+        outlet="Diario Test",
+        source_url="https://diario.test/opinion/quien/",
+        source_type=SourceType.html,
+        active=True,
+    )
+    db.add(c)
+    db.flush()
+    return c
+
+
+def _rutas():
+    respx.get("https://diario.test/opinion/quien/").mock(
+        return_value=httpx.Response(200, text=PAGINA_DEL_AUTOR)
+    )
+    respx.get(URL_NUEVA).mock(
+        return_value=httpx.Response(200, text=COLUMNA_COMPLETA)
+    )
+    respx.get(URL_RECORTADA).mock(
+        return_value=httpx.Response(200, text=COLUMNA_RECORTADA)
+    )
+
+
+# ---------------------------------------------------------------------------
+@respx.mock
+def test_guarda_la_columna_entera_y_descarta_la_recortada(db):
+    from app.collector.runner import collect_all
+    from app.models import Article
+
+    _rutas()
+    columnista = _columnista(db)
+
+    resultado = collect_all(db, columnist_ids=[columnista.id])
+
+    titulos = {a.title for a in db.scalars(select(Article)).all()}
+    assert titulos == {"La nueva"}, "la recortada no debía guardarse"
+    assert len(resultado.new_article_ids) == 1
+    assert resultado.sources_failed == 0
+
+
+@respx.mock
+def test_dice_por_que_no_guardo_la_recortada(db):
+    """El motivo tiene que quedar escrito, no solo en los registros."""
+    from app.collector.runner import collect_all
+    from app.models import SourceRun
+
+    _rutas()
+    columnista = _columnista(db)
+    collect_all(db, columnist_ids=[columnista.id])
+
+    fila = db.scalar(select(SourceRun))
+    assert fila.articles_new == 1
+    # Se guardó una, así que no hay queja general; pero la recortada quedó
+    # anotada en el registro del contenedor y no rompió la ejecución.
+    assert fila.status.value == "ok"
+
+
+@respx.mock
+def test_la_segunda_vuelta_explica_que_ya_estaba_todo_guardado(db):
+    """El caso que confundía: «no llega nada» sin decir que ya estaba."""
+    from app.collector.runner import collect_all
+    from app.models import SourceRun
+
+    _rutas()
+    columnista = _columnista(db)
+    collect_all(db, columnist_ids=[columnista.id])
+    collect_all(db, columnist_ids=[columnista.id])
+
+    ultima = db.scalars(
+        select(SourceRun).order_by(SourceRun.id.desc())
+    ).first()
+    assert ultima.articles_new == 0
+    assert ultima.error_message is not None
+    assert "ya estaban guardados" in ultima.error_message
+    # Y explícitamente NO el mensaje que antes lo tapaba todo
+    assert "no publicó hoy" not in ultima.error_message
+
+
+@respx.mock
+def test_una_pagina_que_no_deja_extraer_lo_dice(db):
+    """Si el medio recorta TODO, el usuario tiene que enterarse."""
+    from app.collector.runner import collect_all
+    from app.models import SourceRun
+
+    respx.get("https://diario.test/opinion/quien/").mock(
+        return_value=httpx.Response(
+            200,
+            text=PAGINA_DEL_AUTOR.replace(URL_NUEVA, URL_RECORTADA),
+        )
+    )
+    respx.get(URL_RECORTADA).mock(
+        return_value=httpx.Response(200, text=COLUMNA_RECORTADA)
+    )
+    columnista = _columnista(db)
+
+    collect_all(db, columnist_ids=[columnista.id])
+
+    fila = db.scalar(select(SourceRun))
+    assert fila.articles_new == 0
+    assert "no dejó extraer el texto" in (fila.error_message or "")
+    assert "muro de pago" in (fila.error_message or "")
+
+
+@respx.mock
+def test_una_columna_asomada_se_guarda_marcada_de_pago(db):
+    """Dos párrafos de cortesía y nada más.
+
+    No se tira: se guarda marcada «de pago», que es lo útil — así ves que la
+    columna existe y que lo que falta es la suscripción, en vez de creer que
+    ese día el columnista no escribió.
+    """
+    from app.collector.runner import collect_all
+    from app.models import Article
+
+    respx.get("https://diario.test/opinion/quien/").mock(
+        return_value=httpx.Response(
+            200,
+            text=PAGINA_DEL_AUTOR.replace(URL_NUEVA, URL_ASOMADA).replace(URL_RECORTADA, URL_ASOMADA),
+        )
+    )
+    respx.get(URL_ASOMADA).mock(
+        return_value=httpx.Response(200, text=COLUMNA_ASOMADA)
+    )
+    columnista = _columnista(db)
+
+    collect_all(db, columnist_ids=[columnista.id])
+
+    guardado = db.scalar(select(Article))
+    assert guardado is not None
+    assert guardado.is_paywalled is True
+    assert guardado.word_count < 60
+
+
+@respx.mock
+def test_una_fuente_caida_no_tumba_a_las_demas(db):
+    """El principio de diseño, comprobado de verdad."""
+    from app.collector.runner import collect_all
+    from app.models import Article, Columnist, SourceType
+
+    _rutas()
+    buena = _columnista(db)
+    mala = Columnist(
+        name="Fuente Rota",
+        outlet="Otro Diario",
+        source_url="https://caido.test/opinion/nadie/",
+        source_type=SourceType.html,
+        active=True,
+    )
+    db.add(mala)
+    db.flush()
+    respx.get("https://caido.test/opinion/nadie/").mock(
+        side_effect=httpx.ConnectError("sin red")
+    )
+
+    resultado = collect_all(db, columnist_ids=[buena.id, mala.id])
+
+    assert db.scalar(select(Article).where(Article.title == "La nueva")) is not None
+    assert resultado.sources_total == 2
+
+
+@respx.mock
+def test_no_se_traen_columnas_mas_viejas_que_el_limite(db):
+    from app.collector.runner import MAX_AGE_DAYS, _filter_candidates
+    from app.collector.extractors.base import ArticleRef
+
+    columnista = _columnista(db)
+    ahora = dt.datetime.now(dt.timezone.utc)
+    refs = [
+        ArticleRef(url="https://diario.test/a/", published_at=ahora),
+        ArticleRef(
+            url="https://diario.test/b/",
+            published_at=ahora - dt.timedelta(days=MAX_AGE_DAYS + 1),
+        ),
+    ]
+
+    vivos, descartes = _filter_candidates(db, columnista, refs)
+
+    assert [r.url for r in vivos] == ["https://diario.test/a"]
+    assert any("más viejos" in d for d in descartes)
+
+
+# ---------------------------------------------------------------------------
+# La fecha que va dentro de la dirección
+# ---------------------------------------------------------------------------
+COLUMNA_CON_FECHA_AJENA = f"""
+<html><head><title>La de hoy</title>
+<meta property="og:title" content="La de hoy">
+<link rel="canonical" href="{URL_DE_HOY}/">
+</head><body>
+  <aside>Lo mas leido: una nota vieja del 3 de febrero de 2026</aside>
+  <article><h1>La de hoy</h1><div class="cuerpo-nota">
+  <p>Primer parrafo con suficiente texto como para que el limpiador de bloques
+     no lo tire, hablando de la reforma que discute el Congreso esta semana.</p>
+  <p>Segundo parrafo que insiste en el asunto y aporta cifras concretas, de modo
+     que el conteo de palabras supere con holgura el minimo exigido.</p>
+  <p>Tercer parrafo de cierre, tambien largo, para que no queden dudas de que
+     esta columna se extrajo entera y debe guardarse sin ningun problema.</p>
+  </div></article>
+</body></html>
+"""
+
+
+@respx.mock
+def test_una_fecha_de_la_barra_lateral_no_desplaza_a_la_columna(db):
+    """El fallo real: la columna de ayer acababa fechada meses atrás.
+
+    Bastaba con que en la página asomara la fecha de otra nota para que el
+    artículo se hundiera al fondo de la lista, sin que nada diera error.
+    """
+    from app.collector.runner import collect_all
+    from app.models import Article
+
+    respx.get("https://diario.test/opinion/quien/").mock(
+        return_value=httpx.Response(
+            200,
+            text=PAGINA_DEL_AUTOR.replace(URL_NUEVA, URL_DE_HOY),
+        )
+    )
+    respx.get(URL_DE_HOY).mock(
+        return_value=httpx.Response(200, text=COLUMNA_CON_FECHA_AJENA)
+    )
+    respx.get(URL_RECORTADA).mock(
+        return_value=httpx.Response(200, text=COLUMNA_RECORTADA)
+    )
+    columnista = _columnista(db)
+
+    collect_all(db, columnist_ids=[columnista.id])
+
+    guardado = db.scalar(select(Article).where(Article.title == "La de hoy"))
+    assert guardado is not None
+    assert guardado.published_at.date() == dt.date.today(), (
+        "debía ganar la fecha de la dirección, no la de la barra lateral"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Columnistas que se cambian de medio
+# ---------------------------------------------------------------------------
+def test_un_traslado_mueve_la_ficha_y_conserva_el_historico(db):
+    """No debe duplicarse ni perder lo ya recopilado."""
+    from app import seed as semilla
+    from app.models import Article, Columnist
+
+    viejo = Columnist(
+        name="Jorge G. Castañeda", outlet="El Financiero",
+        source_url="https://www.elfinanciero.com.mx/opinion/jorge-castaneda/",
+        extractor_key="elfinanciero", consecutive_failures=7,
+        last_error="redirige a la sección de opinión",
+    )
+    db.add(viejo)
+    db.flush()
+    db.add(Article(
+        columnist_id=viejo.id, title="Una columna vieja", author="x",
+        outlet="El Financiero", canonical_url="https://ejemplo.mx/vieja",
+        original_url="https://ejemplo.mx/vieja",
+        published_at=dt.datetime.now(dt.timezone.utc), body=[],
+        plain_text="x" * 200, content_hash="hh", word_count=100,
+        reading_minutes=1,
+    ))
+    db.flush()
+
+    assert semilla.apply_moves(db) == 1
+
+    fichas = db.scalars(
+        select(Columnist).where(Columnist.name == "Jorge G. Castañeda")
+    ).all()
+    assert len(fichas) == 1, "trasladar no debe duplicar la ficha"
+    ficha = fichas[0]
+    assert ficha.id == viejo.id, "el id se conserva, y con él su histórico"
+    assert ficha.outlet == "El Universal"
+    assert "eluniversal.com.mx" in ficha.source_url
+    assert ficha.extractor_key == "eluniversal"
+    assert ficha.consecutive_failures == 0
+    assert ficha.last_error is None
+
+    assert db.scalar(
+        select(func.count(Article.id)).where(Article.columnist_id == ficha.id)
+    ) == 1
+
+
+def test_un_traslado_ya_hecho_no_vuelve_a_aplicarse(db):
+    from app import seed as semilla
+    from app.models import Columnist
+
+    db.add(Columnist(
+        name="Jorge G. Castañeda", outlet="El Financiero",
+        source_url="https://www.elfinanciero.com.mx/opinion/jorge-castaneda/",
+    ))
+    db.flush()
+
+    assert semilla.apply_moves(db) == 1
+    assert semilla.apply_moves(db) == 0
+
+
+def test_si_ya_lo_diste_de_alta_en_el_medio_nuevo_no_se_toca_nada(db):
+    """Borrar la ficha vieja se llevaría por delante su histórico."""
+    from app import seed as semilla
+    from app.models import Columnist
+
+    db.add(Columnist(name="Jorge G. Castañeda", outlet="El Financiero",
+                     source_url="https://viejo.test/"))
+    db.add(Columnist(name="Jorge G. Castañeda", outlet="El Universal",
+                     source_url="https://nuevo.test/"))
+    db.flush()
+
+    assert semilla.apply_moves(db) == 0
+    assert db.scalar(
+        select(func.count(Columnist.id)).where(Columnist.name == "Jorge G. Castañeda")
+    ) == 2
+
+
+def test_se_corrige_una_direccion_que_el_medio_movio(db):
+    from app import seed as semilla
+    from app.models import Columnist
+
+    db.add(Columnist(
+        name="Javier Solórzano", outlet="La Razón",
+        source_url="https://www.razon.com.mx/autor/javier-solorzano-zinser/",
+        consecutive_failures=5, last_error="redirige a la portada",
+        feed_url="https://www.razon.com.mx/feed/",
+    ))
+    db.flush()
+
+    assert semilla.apply_url_fixes(db) == 1
+
+    ficha = db.scalar(select(Columnist).where(Columnist.name == "Javier Solórzano"))
+    assert "/autores/" in ficha.source_url
+    assert ficha.consecutive_failures == 0
+    assert ficha.feed_url is None, "el feed del sitio entero no debe sobrevivir"
+
+    assert semilla.apply_url_fixes(db) == 0, "no debe repetirse"
+
+
+def test_una_direccion_puesta_a_mano_no_se_pisa(db):
+    """Si el usuario la corrigió él, manda la suya."""
+    from app import seed as semilla
+    from app.models import Columnist
+
+    db.add(Columnist(
+        name="Javier Solórzano", outlet="La Razón",
+        source_url="https://www.razon.com.mx/algo-que-puse-yo/",
+    ))
+    db.flush()
+
+    assert semilla.apply_url_fixes(db) == 0
+    ficha = db.scalar(select(Columnist).where(Columnist.name == "Javier Solórzano"))
+    assert ficha.source_url == "https://www.razon.com.mx/algo-que-puse-yo/"
+
+
+def test_el_arranque_completo_sobre_una_base_ya_sembrada(db):
+    """La secuencia real del contenedor sobre una base con la lista anterior.
+
+    Es la prueba que faltaba: los traslados dejaban el cambio solo en memoria
+    y la semilla, al preguntar por el medio nuevo, leía todavía el viejo,
+    respondía que faltaba e insertaba un duplicado. Al guardar, los dos
+    chocaban contra la restricción (nombre, medio) y el contenedor se quedaba
+    reiniciándose sin arrancar.
+    """
+    from app import seed as semilla
+    from app.models import Columnist
+
+    # El estado anterior: cada uno en el medio del que después se movió
+    anteriores = [
+        ("Jorge G. Castañeda", "El Financiero",
+         "https://www.elfinanciero.com.mx/opinion/jorge-castaneda/"),
+        ("María Amparo Casar", "UnoTV",
+         "https://www.unotv.com/opinion/maria-amparo-casar/"),
+        ("Javier Solórzano", "La Razón",
+         "https://www.razon.com.mx/autor/javier-solorzano-zinser/"),
+    ]
+    for nombre, medio, url in anteriores:
+        db.add(Columnist(name=nombre, outlet=medio, source_url=url))
+    db.commit()
+
+    resultado = semilla.run(db)
+
+    assert resultado["columnists_moved"] == 2
+    assert resultado["urls_fixed"] == 1
+
+    # Ni un solo columnista repetido
+    for nombre, _, _ in anteriores:
+        fichas = db.scalars(select(Columnist).where(Columnist.name == nombre)).all()
+        assert len(fichas) == 1, f"{nombre} quedó duplicado: {[f.outlet for f in fichas]}"
+
+    medios = {
+        f.name: f.outlet
+        for f in db.scalars(select(Columnist)).all()
+        if f.name in {n for n, _, _ in anteriores}
+    }
+    assert medios["Jorge G. Castañeda"] == "El Universal"
+    assert medios["María Amparo Casar"] == "Sonora Presente"
+
+
+def test_el_arranque_es_idempotente(db):
+    """Arrancar el contenedor dos veces no puede duplicar nada."""
+    from app import seed as semilla
+    from app.models import Columnist
+
+    db.add(Columnist(name="Jorge G. Castañeda", outlet="El Financiero",
+                     source_url="https://www.elfinanciero.com.mx/opinion/jorge-castaneda/"))
+    db.commit()
+
+    semilla.run(db)
+    cuantos = db.scalar(select(func.count(Columnist.id)))
+    semilla.run(db)
+
+    assert db.scalar(select(func.count(Columnist.id))) == cuantos
+
+
+# ---------------------------------------------------------------------------
+# Pausa general
+# ---------------------------------------------------------------------------
+def test_en_pausa_no_se_dispara_nada(db, monkeypatch):
+    """El «tick» es el único sitio del que arranca todo lo automático."""
+    from app import tasks
+
+    prefs = tasks._prefs(db)
+    prefs.collection_paused = True
+    prefs.collect_hour, prefs.collect_minute = 0, 0   # la hora ya pasó
+    db.commit()
+
+    lanzados = []
+    monkeypatch.setattr(tasks.collect, "delay",
+                        lambda **kw: lanzados.append(("collect", kw)))
+    monkeypatch.setattr(tasks.apply_retention, "delay",
+                        lambda: lanzados.append(("retention", {})))
+    monkeypatch.setattr(tasks, "session_scope", _sesion_fija(db))
+
+    assert tasks.tick() == "en pausa"
+    assert lanzados == [], "en pausa no debe lanzarse ninguna tarea"
+
+
+def test_al_reanudar_vuelve_a_recolectar(db, monkeypatch):
+    from app import tasks
+
+    prefs = tasks._prefs(db)
+    prefs.collection_paused = False
+    prefs.collect_hour, prefs.collect_minute = 0, 0
+    db.commit()
+
+    lanzados = []
+    monkeypatch.setattr(tasks.collect, "delay",
+                        lambda **kw: lanzados.append(("collect", kw)))
+    monkeypatch.setattr(tasks.apply_retention, "delay",
+                        lambda: lanzados.append(("retention", {})))
+    monkeypatch.setattr(tasks, "session_scope", _sesion_fija(db))
+
+    assert tasks.tick() == "recolección lanzada"
+    assert [n for n, _ in lanzados] == ["collect", "retention"]
+
+
+def _sesion_fija(db):
+    """session_scope de mentira que reutiliza la sesión de la prueba."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def fabrica():
+        yield db
+
+    return fabrica
+
+
+def test_los_cuatro_de_reforma_pasan_a_la_pagina_de_opinion(db):
+    """Las direcciones de autor de Reforma nunca existieron (404): se corrigen."""
+    from app import seed as semilla
+    from app.models import Columnist
+
+    nombres = {
+        "Sergio Sarmiento": "sergio-sarmiento",
+        "Denise Dresser": "denise-dresser",
+    }
+    for nombre, slug in nombres.items():
+        db.add(Columnist(
+            name=nombre, outlet="Reforma",
+            source_url=f"https://www.reforma.com/{slug}/",
+        ))
+    db.flush()
+
+    assert semilla.apply_url_fixes(db) == 2
+    for nombre in nombres:
+        ficha = db.scalar(select(Columnist).where(Columnist.name == nombre))
+        assert "/editoriales" in ficha.source_url

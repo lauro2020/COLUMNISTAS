@@ -1,0 +1,5 @@
+# Solo se usa en el servidor (docker-compose.prod.yml).
+# {$DOMAIN} viene del .env: el dominio con el que entras a la app.
+{$DOMAIN} {
+	reverse_proxy web:80
+}

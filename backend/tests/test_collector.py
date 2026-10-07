@@ -1,0 +1,426 @@
+"""Pruebas del cliente HTTP, el RSS y la seguridad."""
+
+from __future__ import annotations
+
+import httpx
+import pytest
+import respx
+
+from app.collector import rss
+from app.collector.http_client import Fetcher
+from app.config import settings
+from app.security import create_token, decode_token, decrypt_payload, encrypt_payload
+from tests import fixtures
+
+
+@pytest.fixture(autouse=True)
+def sin_esperas(monkeypatch):
+    """Quita los retardos de cortesía para que las pruebas vuelen."""
+    monkeypatch.setattr(settings, "request_delay_seconds", 0.0)
+    monkeypatch.setattr(settings, "respect_robots", False)
+    monkeypatch.setattr(settings, "max_retries", 2)
+    monkeypatch.setattr(Fetcher, "_backoff", staticmethod(lambda attempt: None))
+
+
+# ---------------------------------------------------------------------------
+# Cliente HTTP
+# ---------------------------------------------------------------------------
+@respx.mock
+def test_fetcher_envia_user_agent_propio():
+    ruta = respx.get("https://diariox.test/a").mock(
+        return_value=httpx.Response(200, text="hola")
+    )
+    with Fetcher() as fetcher:
+        resultado = fetcher.get("https://diariox.test/a")
+
+    assert resultado.ok
+    assert "ColumnistasBot" in ruta.calls[0].request.headers["user-agent"]
+
+
+@respx.mock
+def test_fetcher_reintenta_ante_error_temporal():
+    respx.get("https://diariox.test/b").mock(
+        side_effect=[httpx.Response(503), httpx.Response(200, text="ya está")]
+    )
+    with Fetcher() as fetcher:
+        resultado = fetcher.get("https://diariox.test/b")
+
+    assert resultado.ok
+    assert resultado.text == "ya está"
+
+
+@respx.mock
+def test_fetcher_devuelve_error_sin_lanzar_excepcion():
+    respx.get("https://diariox.test/c").mock(side_effect=httpx.ConnectError("sin red"))
+    with Fetcher() as fetcher:
+        resultado = fetcher.get("https://diariox.test/c")
+
+    assert resultado.ok is False
+    assert "ConnectError" in resultado.error
+
+
+@respx.mock
+def test_fetcher_manda_las_cookies_de_suscriptor():
+    ruta = respx.get("https://reforma.com/x").mock(return_value=httpx.Response(200, text="ok"))
+    with Fetcher(cookies={"sesion": "abc123"}) as fetcher:
+        fetcher.get("https://reforma.com/x")
+
+    assert "sesion=abc123" in ruta.calls[0].request.headers["cookie"]
+
+
+def test_robots_bloqueado_no_descarga(monkeypatch):
+    monkeypatch.setattr(settings, "respect_robots", True)
+    from app.collector import http_client
+
+    monkeypatch.setattr(http_client._robots, "allowed", lambda url, ua: False)
+    with Fetcher() as fetcher:
+        resultado = fetcher.get("https://diariox.test/prohibido")
+
+    assert resultado.ok is False
+    assert "robots" in resultado.error.lower()
+
+
+# ---------------------------------------------------------------------------
+# RSS
+# ---------------------------------------------------------------------------
+@respx.mock
+def test_parse_feed():
+    respx.get("https://diariox.test/feed").mock(
+        return_value=httpx.Response(200, text=fixtures.RSS_FEED)
+    )
+    with Fetcher() as fetcher:
+        refs = rss.parse_feed("https://diariox.test/feed", fetcher)
+
+    assert len(refs) == 2
+    assert refs[0].title == "Columna del lunes"
+    assert refs[0].published_at is not None
+    assert refs[0].url == "https://diariox.test/opinion/2025/03/10/columna-del-lunes"
+
+
+def test_descubrir_feed_en_el_head():
+    """Se acepta el feed que cuelga de la página del autor."""
+    encontrado = rss.discover_feed_url(
+        fixtures.PAGE_WITH_FEED_LINK, "https://diariox.test/opinion/"
+    )
+    assert encontrado == "https://diariox.test/opinion/feed"
+
+
+def test_un_feed_de_otra_seccion_no_se_toma_por_el_del_autor():
+    """`/opinion/feed` en la página de un autor es el de toda la sección."""
+    encontrado = rss.discover_feed_url(
+        fixtures.PAGE_WITH_FEED_LINK, "https://diariox.test/autores/fulanito/"
+    )
+    assert encontrado is None
+
+
+@respx.mock
+def test_feed_invalido_da_error_claro():
+    respx.get("https://diariox.test/malo").mock(
+        return_value=httpx.Response(200, text="esto no es un feed")
+    )
+    with Fetcher() as fetcher, pytest.raises(RuntimeError):
+        rss.parse_feed("https://diariox.test/malo", fetcher)
+
+
+# ---------------------------------------------------------------------------
+# Seguridad
+# ---------------------------------------------------------------------------
+def test_cifrado_de_credenciales_ida_y_vuelta():
+    original = {"cookies": {"sesion": "valor-secreto"}}
+    blob = encrypt_payload(original)
+
+    assert "valor-secreto" not in blob, "el secreto no puede quedar legible"
+    assert decrypt_payload(blob) == original
+
+
+def test_credencial_corrupta_no_revienta():
+    assert decrypt_payload("esto-no-es-un-token-valido") == {}
+
+
+def test_token_de_sesion():
+    token = create_token()
+    assert decode_token(token)["sub"] == "owner"
+    assert decode_token("token.falso.xxx") is None
+
+
+# ---------------------------------------------------------------------------
+# Fallos de resolución de nombres (DNS)
+# ---------------------------------------------------------------------------
+import socket  # noqa: E402
+
+from app.collector.http_client import alternate_host_url, is_dns_error  # noqa: E402
+
+
+@pytest.mark.parametrize("mensaje", [
+    "[Errno -5] No address associated with hostname",
+    "[Errno -2] Name or service not known",
+    "nodename nor servname provided, or not known",
+    "Temporary failure in name resolution",
+])
+def test_se_reconocen_los_fallos_de_dns(mensaje):
+    assert is_dns_error(httpx.ConnectError(mensaje)) is True
+
+
+def test_no_confunde_otros_fallos_con_dns():
+    assert is_dns_error(httpx.ConnectError("[Errno 111] Connection refused")) is False
+    assert is_dns_error(httpx.ReadTimeout("se acabó el tiempo")) is False
+    assert is_dns_error(socket.gaierror(-5, "lo que sea")) is True
+
+
+def test_alternar_el_dominio_con_y_sin_www():
+    assert alternate_host_url("https://www.reforma.com/autor/") == "https://reforma.com/autor/"
+    assert alternate_host_url("https://reforma.com/autor/") == "https://www.reforma.com/autor/"
+    assert alternate_host_url("no-es-una-url") is None
+
+
+@respx.mock
+def test_si_el_dominio_no_resuelve_se_prueba_la_otra_variante():
+    respx.get("https://www.medio.test/autor/").mock(
+        side_effect=httpx.ConnectError("[Errno -5] No address associated with hostname")
+    )
+    respx.get("https://medio.test/autor/").mock(
+        return_value=httpx.Response(200, text="la columna")
+    )
+
+    with Fetcher() as fetcher:
+        resultado = fetcher.get("https://www.medio.test/autor/")
+
+    assert resultado.ok
+    assert resultado.text == "la columna"
+    assert fetcher.host_swaps == {"www.medio.test": "medio.test"}
+
+
+@respx.mock
+def test_si_ninguna_variante_resuelve_el_error_es_claro():
+    respx.get("https://www.medio.test/autor/").mock(
+        side_effect=httpx.ConnectError("[Errno -5] No address associated with hostname")
+    )
+    respx.get("https://medio.test/autor/").mock(
+        side_effect=httpx.ConnectError("[Errno -5] No address associated with hostname")
+    )
+
+    with Fetcher() as fetcher:
+        resultado = fetcher.get("https://www.medio.test/autor/")
+
+    assert resultado.ok is False
+    assert "no se pudo resolver el dominio" in resultado.error.lower()
+    assert "doctor" in resultado.error, "el mensaje debe decir cómo diagnosticarlo"
+    assert fetcher.host_swaps == {}
+
+
+@respx.mock
+def test_un_fallo_de_dns_no_gasta_los_reintentos():
+    """Reintentar no arregla un DNS roto: debe fallar rápido, no en 14 segundos."""
+    ruta = respx.get("https://www.medio.test/autor/").mock(
+        side_effect=httpx.ConnectError("[Errno -5] No address associated with hostname")
+    )
+    respx.get("https://medio.test/autor/").mock(
+        side_effect=httpx.ConnectError("[Errno -5] No address associated with hostname")
+    )
+
+    with Fetcher() as fetcher:
+        fetcher.get("https://www.medio.test/autor/")
+
+    assert ruta.call_count == 1, "una sola petición al dominio original"
+
+
+# ---------------------------------------------------------------------------
+# Identificación ante los medios
+# ---------------------------------------------------------------------------
+@respx.mock
+def test_por_defecto_se_identifica_como_columnistas():
+    ruta = respx.get("https://medio.test/a").mock(return_value=httpx.Response(200))
+    with Fetcher() as fetcher:
+        fetcher.get("https://medio.test/a")
+
+    agente = ruta.calls[0].request.headers["user-agent"]
+    assert "ColumnistasBot" in agente
+
+
+@respx.mock
+def test_con_identidad_de_navegador_se_manda_la_cabecera_de_un_navegador():
+    ruta = respx.get("https://medio.test/a").mock(return_value=httpx.Response(200))
+    with Fetcher(browser_identity=True) as fetcher:
+        fetcher.get("https://medio.test/a")
+
+    cabeceras = ruta.calls[0].request.headers
+    assert "Mozilla/5.0" in cabeceras["user-agent"]
+    assert "ColumnistasBot" not in cabeceras["user-agent"]
+    assert cabeceras["sec-fetch-mode"] == "navigate"
+
+
+@respx.mock
+def test_un_403_explica_que_hacer():
+    respx.get("https://medio.test/a").mock(return_value=httpx.Response(403))
+    with Fetcher() as fetcher:
+        resultado = fetcher.get("https://medio.test/a")
+
+    assert resultado.ok is False
+    assert "403" in resultado.error
+    assert "navegador" in resultado.error.lower(), "debe sugerir la solución"
+
+
+@respx.mock
+def test_un_403_con_identidad_de_navegador_sugiere_el_paso_siguiente():
+    respx.get("https://medio.test/a").mock(return_value=httpx.Response(403))
+    with Fetcher(browser_identity=True) as fetcher:
+        resultado = fetcher.get("https://medio.test/a")
+
+    assert "headless" in resultado.error.lower()
+
+
+@respx.mock
+def test_un_401_apunta_a_las_credenciales():
+    respx.get("https://medio.test/a").mock(return_value=httpx.Response(401))
+    with Fetcher() as fetcher:
+        resultado = fetcher.get("https://medio.test/a")
+
+    assert "credenciales" in resultado.error.lower()
+
+
+# ---------------------------------------------------------------------------
+# Navegador headless ausente
+# ---------------------------------------------------------------------------
+@respx.mock
+def test_sin_playwright_se_sigue_con_peticiones_normales(monkeypatch):
+    """Activar ENABLE_HEADLESS_BROWSER sin instalarlo no debe romper la fuente."""
+    from app.collector import http_client
+
+    monkeypatch.setattr(settings, "enable_headless_browser", True)
+    monkeypatch.setattr(http_client, "playwright_available", lambda: False)
+
+    respx.get("https://medio.test/autor/").mock(
+        return_value=httpx.Response(200, text="el listado")
+    )
+    with Fetcher() as fetcher:
+        resultado = fetcher.get("https://medio.test/autor/", use_browser=True)
+
+    assert resultado.ok, "debe caer a la petición normal, no fallar"
+    assert resultado.text == "el listado"
+    assert resultado.from_browser is False
+
+
+# ---------------------------------------------------------------------------
+# Login: freno a la fuerza bruta
+# ---------------------------------------------------------------------------
+def test_el_login_se_bloquea_tras_varios_intentos_fallidos(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.api import routes_auth
+    from app.main import app
+
+    monkeypatch.setattr(settings, "login_max_attempts", 3)
+    monkeypatch.setattr(settings, "login_lockout_minutes", 15)
+    monkeypatch.setattr(routes_auth.time, "sleep", lambda s: None)
+    routes_auth._failures.clear()
+
+    client = TestClient(app)
+    codigos = [
+        client.post("/api/auth/login", json={"password": "mala"}).status_code
+        for _ in range(4)
+    ]
+
+    assert codigos[:3] == [401, 401, 401], "los primeros intentos solo se rechazan"
+    assert codigos[3] == 429, "a partir del tope se bloquea"
+
+    bloqueado = client.post("/api/auth/login", json={"password": settings.app_password})
+    assert bloqueado.status_code == 429, "ni con la buena mientras está bloqueado"
+    assert "minuto" in bloqueado.json()["detail"]
+
+    routes_auth._failures.clear()
+
+
+def test_un_login_correcto_borra_los_intentos_previos(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.api import routes_auth
+    from app.main import app
+
+    monkeypatch.setattr(settings, "login_max_attempts", 3)
+    monkeypatch.setattr(routes_auth.time, "sleep", lambda s: None)
+    routes_auth._failures.clear()
+
+    client = TestClient(app)
+    client.post("/api/auth/login", json={"password": "mala"})
+    client.post("/api/auth/login", json={"password": "mala"})
+    assert client.post(
+        "/api/auth/login", json={"password": settings.app_password}
+    ).status_code == 200
+    assert routes_auth._failures == {}, "el contador se reinicia al acertar"
+
+
+def test_la_documentacion_de_la_api_no_es_publica_por_defecto():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    assert settings.enable_api_docs is False
+    assert TestClient(app).get("/api/docs").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# El mensaje correcto al no poder entrar
+# ---------------------------------------------------------------------------
+def test_una_contrasena_incorrecta_dice_que_es_incorrecta(monkeypatch):
+    """No debe confundirse con «la sesión caducó»: aún no hay sesión."""
+    from fastapi.testclient import TestClient
+
+    from app.api import routes_auth
+    from app.main import app
+
+    monkeypatch.setattr(routes_auth.time, "sleep", lambda s: None)
+    routes_auth._failures.clear()
+
+    respuesta = TestClient(app).post("/api/auth/login", json={"password": "no-es"})
+
+    assert respuesta.status_code == 401
+    assert respuesta.json()["detail"] == "Contraseña incorrecta"
+    routes_auth._failures.clear()
+
+
+# ---------------------------------------------------------------------------
+# El feed del columnista, no el de todo el periódico
+# ---------------------------------------------------------------------------
+CABECERA_WORDPRESS = """
+<html><head>
+  <link rel="alternate" type="application/rss+xml" title="Sonora Presente &raquo; Feed"
+        href="https://sonorapresente.com/feed/">
+  <link rel="alternate" type="application/rss+xml" title="Feed de María Amparo Casar"
+        href="https://sonorapresente.com/columnista/mariaamparocasar/feed/">
+</head><body></body></html>
+"""
+
+
+def test_se_elige_el_feed_del_columnista_y_no_el_del_sitio():
+    """WordPress anuncia primero el del sitio entero: quedarse con ese
+    llenaría la bandeja de columnas de otras personas."""
+    encontrado = rss.discover_feed_url(
+        CABECERA_WORDPRESS, "https://sonorapresente.com/columnista/mariaamparocasar/"
+    )
+    assert encontrado == "https://sonorapresente.com/columnista/mariaamparocasar/feed"
+
+
+def test_si_solo_hay_feed_de_todo_el_sitio_no_se_usa_ninguno():
+    solo_el_del_sitio = """
+    <html><head><link rel="alternate" type="application/rss+xml"
+        href="https://sonorapresente.com/feed/"></head><body></body></html>
+    """
+    assert rss.discover_feed_url(
+        solo_el_del_sitio, "https://sonorapresente.com/columnista/mariaamparocasar/"
+    ) is None
+
+
+def test_para_la_portada_de_un_sitio_cualquier_feed_vale():
+    assert rss.discover_feed_url(
+        CABECERA_WORDPRESS, "https://sonorapresente.com/"
+    ) == "https://sonorapresente.com/feed"
+
+
+@pytest.mark.parametrize("feed,autor,es_suyo", [
+    ("https://s.mx/columnista/casar/feed/", "https://s.mx/columnista/casar/", True),
+    ("https://s.mx/feed/author/javier-solorzano", "https://s.mx/autores/javier-solorzano/", True),
+    ("https://s.mx/feed/", "https://s.mx/columnista/casar/", False),
+    ("https://s.mx/rss.xml", "https://s.mx/seccion/que-alguien-me-explique/", False),
+])
+def test_se_distingue_el_feed_propio_del_general(feed, autor, es_suyo):
+    assert rss.feed_belongs_to_author(feed, autor) is es_suyo
